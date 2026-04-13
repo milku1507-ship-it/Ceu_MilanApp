@@ -9,6 +9,7 @@ import {
   Package, Info, TrendingUp, DollarSign, MoreVertical, Copy
 } from 'lucide-react';
 import { Product, Variant, HppMaterial, Ingredient } from '../types';
+import { User } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
@@ -23,6 +24,7 @@ import {
 import { auth, db, doc, setDoc, deleteDoc, OperationType, handleFirestoreError } from '../lib/firebase';
 
 interface HPPManagerProps {
+  user: User | null;
   products: Product[];
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
   ingredients: Ingredient[];
@@ -32,8 +34,7 @@ interface HPPManagerProps {
 
 type ViewState = 'products' | 'variants' | 'detail';
 
-export default function HPPManager({ products, setProducts, ingredients, setIngredients, onSetBack }: HPPManagerProps) {
-  const user = auth.currentUser;
+export default function HPPManager({ user, products, setProducts, ingredients, setIngredients, onSetBack }: HPPManagerProps) {
   const [view, setView] = React.useState<ViewState>('products');
   const [selectedProductId, setSelectedProductId] = React.useState<string | null>(null);
   const [selectedVariantId, setSelectedVariantId] = React.useState<string | null>(null);

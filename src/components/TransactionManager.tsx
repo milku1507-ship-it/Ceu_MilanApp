@@ -20,8 +20,10 @@ import {
 } from "@/components/ui/dialog";
 
 import { auth, db, doc, setDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError } from '../lib/firebase';
+import { User } from 'firebase/auth';
 
 interface TransactionManagerProps {
+  user: User | null;
   transactions: Transaction[];
   setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
   products: Product[];
@@ -41,8 +43,7 @@ const CATEGORIES = [
   { name: 'Lainnya', type: 'Pengeluaran', fixed: false },
 ];
 
-export default function TransactionManager({ transactions, setTransactions, products, ingredients, setIngredients }: TransactionManagerProps) {
-  const user = auth.currentUser;
+export default function TransactionManager({ user, transactions, setTransactions, products, ingredients, setIngredients }: TransactionManagerProps) {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState('Semua');
   
@@ -185,15 +186,16 @@ export default function TransactionManager({ transactions, setTransactions, prod
     }
 
     // Identify affected ingredients and calculate snapshot
-    const snapshot: { ingredientId: string; stockBefore: number }[] = [];
+    const snapshot: { ingredientId: string; stockBefore: number; delta: number }[] = [];
     const stockUpdates: { id: string; delta: number }[] = [];
 
     if (newTx.kategori === 'Bahan Baku' || newTx.kategori === 'Packing') {
       if (selectedMaterialId) {
         const material = ingredients.find(i => i.id === selectedMaterialId);
         if (material) {
-          snapshot.push({ ingredientId: material.id, stockBefore: material.currentStock });
-          stockUpdates.push({ id: material.id, delta: newTx.qty_beli || 0 });
+          const delta = newTx.qty_beli || 0;
+          snapshot.push({ ingredientId: material.id, stockBefore: material.currentStock, delta });
+          stockUpdates.push({ id: material.id, delta });
         }
       }
     } else if (newTx.kategori === 'Penjualan' && newTx.penjualan_detail) {
@@ -208,16 +210,20 @@ export default function TransactionManager({ transactions, setTransactions, prod
                   const ingredient = ingredients.find(i => i.name.toLowerCase() === bahan.nama.toLowerCase());
                   if (ingredient) {
                     const totalUsage = bahan.qty * pv.qty;
+                    const delta = -totalUsage;
                     
-                    if (!snapshot.find(s => s.ingredientId === ingredient.id)) {
-                      snapshot.push({ ingredientId: ingredient.id, stockBefore: ingredient.currentStock });
+                    const existingSnapshot = snapshot.find(s => s.ingredientId === ingredient.id);
+                    if (existingSnapshot) {
+                      existingSnapshot.delta += delta;
+                    } else {
+                      snapshot.push({ ingredientId: ingredient.id, stockBefore: ingredient.currentStock, delta });
                     }
                     
                     const existingUpdate = stockUpdates.find(u => u.id === ingredient.id);
                     if (existingUpdate) {
-                      existingUpdate.delta -= totalUsage;
+                      existingUpdate.delta += delta;
                     } else {
-                      stockUpdates.push({ id: ingredient.id, delta: -totalUsage });
+                      stockUpdates.push({ id: ingredient.id, delta });
                     }
                   }
                 });
@@ -326,7 +332,7 @@ export default function TransactionManager({ transactions, setTransactions, prod
             if (ing) {
               batch.set(doc(db, `users/${user.uid}/stok/${ing.id}`), {
                 ...ing,
-                currentStock: snapshot.stockBefore
+                currentStock: ing.currentStock - snapshot.delta
               });
             }
           });
@@ -342,7 +348,7 @@ export default function TransactionManager({ transactions, setTransactions, prod
         setIngredients(prev => prev.map(ing => {
           const snapshot = txToDelete.stockSnapshot?.find(s => s.ingredientId === ing.id);
           if (snapshot) {
-            return { ...ing, currentStock: snapshot.stockBefore };
+            return { ...ing, currentStock: ing.currentStock - snapshot.delta };
           }
           return ing;
         }));
@@ -413,18 +419,18 @@ export default function TransactionManager({ transactions, setTransactions, prod
 
         if (rollback) {
           const selectedTxs = transactions
-            .filter(t => bulkToDelete.includes(t.id))
-            .sort((a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime());
+            .filter(t => bulkToDelete.includes(t.id));
 
           ingredients.forEach(ing => {
-            const earliestTxWithSnapshot = selectedTxs.find(t => 
-              t.stockSnapshot?.some(s => s.ingredientId === ing.id)
-            );
-            const snapshot = earliestTxWithSnapshot?.stockSnapshot?.find(s => s.ingredientId === ing.id);
-            if (snapshot) {
+            const totalDelta = selectedTxs.reduce((acc, t) => {
+              const snapshot = t.stockSnapshot?.find(s => s.ingredientId === ing.id);
+              return acc + (snapshot?.delta || 0);
+            }, 0);
+
+            if (totalDelta !== 0) {
               batch.set(doc(db, `users/${user.uid}/stok/${ing.id}`), {
                 ...ing,
-                currentStock: snapshot.stockBefore
+                currentStock: ing.currentStock - totalDelta
               });
             }
           });
@@ -438,16 +444,16 @@ export default function TransactionManager({ transactions, setTransactions, prod
     } else {
       if (rollback) {
         const selectedTxs = transactions
-          .filter(t => bulkToDelete.includes(t.id))
-          .sort((a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime());
+          .filter(t => bulkToDelete.includes(t.id));
 
         setIngredients(prev => prev.map(ing => {
-          const earliestTxWithSnapshot = selectedTxs.find(t => 
-            t.stockSnapshot?.some(s => s.ingredientId === ing.id)
-          );
-          const snapshot = earliestTxWithSnapshot?.stockSnapshot?.find(s => s.ingredientId === ing.id);
-          if (snapshot) {
-            return { ...ing, currentStock: snapshot.stockBefore };
+          const totalDelta = selectedTxs.reduce((acc, t) => {
+            const snapshot = t.stockSnapshot?.find(s => s.ingredientId === ing.id);
+            return acc + (snapshot?.delta || 0);
+          }, 0);
+
+          if (totalDelta !== 0) {
+            return { ...ing, currentStock: ing.currentStock - totalDelta };
           }
           return ing;
         }));

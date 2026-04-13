@@ -58,7 +58,7 @@ export type Transaction = {
   qty_total: number;
   qty_beli: number;
   penjualan_detail?: PenjualanDetail[];
-  stockSnapshot?: { ingredientId: string; stockBefore: number }[];
+  stockSnapshot?: { ingredientId: string; stockBefore: number; delta: number }[];
 };
 
 export type StoreSettings = {

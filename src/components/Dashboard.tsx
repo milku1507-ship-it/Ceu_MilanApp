@@ -7,15 +7,17 @@ import { Progress } from '@/components/ui/progress';
 import { TrendingUp, TrendingDown, DollarSign, Package, AlertCircle, ArrowUpRight, Clock, Wallet, ArrowUp, ArrowDown, History, MoreHorizontal, LayoutGrid, Calculator } from 'lucide-react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts';
 import { Ingredient, Transaction } from '../types';
+import { User } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 
 interface DashboardProps {
+  user: User | null;
   ingredients: Ingredient[];
   transactions: Transaction[];
   setActiveTab: (tab: string) => void;
 }
 
-export default function Dashboard({ ingredients, transactions, setActiveTab }: DashboardProps) {
+export default function Dashboard({ user, ingredients, transactions, setActiveTab }: DashboardProps) {
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
 

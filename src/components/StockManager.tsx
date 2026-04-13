@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Plus, Minus, Search, Filter, Package, AlertTriangle, TrendingUp, MoreVertical, Wallet, Coins, AlertCircle, Layers, Trash2, Edit } from 'lucide-react';
 import { Ingredient } from '../types';
+import { User } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
@@ -22,13 +23,13 @@ import { Label } from "@/components/ui/label";
 import { auth, db, doc, setDoc, deleteDoc, OperationType, handleFirestoreError } from '../lib/firebase';
 
 interface StockManagerProps {
+  user: User | null;
   ingredients: Ingredient[];
   setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>;
   onSync?: () => void;
 }
 
-export default function StockManager({ ingredients, setIngredients, onSync }: StockManagerProps) {
-  const user = auth.currentUser;
+export default function StockManager({ user, ingredients, setIngredients, onSync }: StockManagerProps) {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [filterCategory, setFilterCategory] = React.useState('Semua');
   const [isAddDialogOpen, setIsAddDialogOpen] = React.useState(false);

@@ -75,13 +75,13 @@ export default function App() {
     // Sync Ingredients
     const unsubIngredients = onSnapshot(collection(db, `users/${uid}/stok`), (snapshot) => {
       const data = snapshot.docs.map(doc => doc.data() as Ingredient);
-      if (data.length > 0) setIngredients(data);
+      setIngredients(data);
     }, (error) => handleFirestoreError(error, OperationType.LIST, `users/${uid}/stok`));
 
     // Sync Products
     const unsubProducts = onSnapshot(collection(db, `users/${uid}/hpp`), (snapshot) => {
       const data = snapshot.docs.map(doc => doc.data() as Product);
-      if (data.length > 0) setProducts(data);
+      setProducts(data);
     }, (error) => handleFirestoreError(error, OperationType.LIST, `users/${uid}/hpp`));
 
     // Sync Transactions
@@ -89,7 +89,7 @@ export default function App() {
       const data = snapshot.docs.map(doc => doc.data() as Transaction);
       // Sort by date descending
       const sorted = data.sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
-      if (data.length > 0) setTransactions(sorted);
+      setTransactions(sorted);
     }, (error) => handleFirestoreError(error, OperationType.LIST, `users/${uid}/transaksi`));
 
     return () => {
@@ -342,13 +342,13 @@ export default function App() {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard ingredients={ingredients} transactions={transactions} setActiveTab={handleTabChange} />;
+        return <Dashboard user={user} ingredients={ingredients} transactions={transactions} setActiveTab={handleTabChange} />;
       case 'hpp':
-        return <HPPManager products={products} setProducts={setProducts} ingredients={ingredients} setIngredients={setIngredients} onSetBack={setBackAction} />;
+        return <HPPManager user={user} products={products} setProducts={setProducts} ingredients={ingredients} setIngredients={setIngredients} onSetBack={setBackAction} />;
       case 'stock':
-        return <StockManager ingredients={ingredients} setIngredients={setIngredients} onSync={() => syncHppToStock(true)} />;
+        return <StockManager user={user} ingredients={ingredients} setIngredients={setIngredients} onSync={() => syncHppToStock(true)} />;
       case 'transactions':
-        return <TransactionManager transactions={transactions} setTransactions={setTransactions} products={products} ingredients={ingredients} setIngredients={setIngredients} />;
+        return <TransactionManager user={user} transactions={transactions} setTransactions={setTransactions} products={products} ingredients={ingredients} setIngredients={setIngredients} />;
       case 'reports':
         return <FinancialReport transactions={transactions} products={products} />;
       case 'store-settings':
@@ -374,9 +374,9 @@ export default function App() {
             </div>
           );
         }
-        return <Dashboard ingredients={ingredients} transactions={transactions} setActiveTab={handleTabChange} />;
+        return <Dashboard user={user} ingredients={ingredients} transactions={transactions} setActiveTab={handleTabChange} />;
       default:
-        return <Dashboard ingredients={ingredients} transactions={transactions} setActiveTab={handleTabChange} />;
+        return <Dashboard user={user} ingredients={ingredients} transactions={transactions} setActiveTab={handleTabChange} />;
     }
   };
 
