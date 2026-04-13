@@ -1,0 +1,88 @@
+{
+  "entities": {
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Store profile and receipt settings",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "tagline": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "logo": { "type": "string", "description": "Base64 or URL of the logo" },
+        "showLogoOnReceipt": { "type": "boolean" },
+        "showNameOnReceipt": { "type": "boolean" },
+        "showAddressOnReceipt": { "type": "boolean" },
+        "showLogoInHeader": { "type": "boolean" },
+        "showLogoInSidebar": { "type": "boolean" },
+        "receiptFooter": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Ingredient": {
+      "title": "Ingredient",
+      "description": "Raw material or ingredient stock",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "unit": { "type": "string" },
+        "price": { "type": "number" },
+        "initialStock": { "type": "number" },
+        "currentStock": { "type": "number" },
+        "minStock": { "type": "number" },
+        "fromHpp": { "type": "boolean" }
+      },
+      "required": ["id", "name", "unit", "price"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Product with variants and HPP materials",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nama": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "varian": { "type": "array" }
+      },
+      "required": ["id", "nama", "varian"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Financial transaction (Income/Expense)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tanggal": { "type": "string", "format": "date" },
+        "keterangan": { "type": "string" },
+        "kategori": { "type": "string" },
+        "jenis": { "type": "string", "enum": ["Pemasukan", "Pengeluaran"] },
+        "nominal": { "type": "number" },
+        "qty_total": { "type": "number" },
+        "qty_beli": { "type": "number" },
+        "penjualan_detail": { "type": "array" },
+        "stockSnapshot": { "type": "array" }
+      },
+      "required": ["id", "tanggal", "jenis", "nominal"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}/profil_toko/settings": {
+      "schema": "StoreSettings",
+      "description": "User's store settings"
+    },
+    "/users/{uid}/stok/{ingredientId}": {
+      "schema": "Ingredient",
+      "description": "User's ingredients and stock"
+    },
+    "/users/{uid}/hpp/{productId}": {
+      "schema": "Product",
+      "description": "User's products and HPP data"
+    },
+    "/users/{uid}/transaksi/{transactionId}": {
+      "schema": "Transaction",
+      "description": "User's financial transactions"
+    }
+  }
+}

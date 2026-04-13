@@ -1,0 +1,88 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: /users/{uid}/profil_toko
+// Document ID: settings
+// Fields:
+//   - name: string (required)
+//   - tagline: string (optional)
+//   - phone: string (optional)
+//   - address: string (optional)
+//   - logo: string (optional)
+//   - showLogoOnReceipt: bool
+//   - showNameOnReceipt: bool
+//   - showAddressOnReceipt: bool
+//   - showLogoInHeader: bool
+//   - showLogoInSidebar: bool
+//   - receiptFooter: string (optional)
+//
+// Collection: /users/{uid}/stok
+// Document ID: {ingredientId}
+// Fields:
+//   - id: string (required)
+//   - name: string (required)
+//   - category: string
+//   - unit: string (required)
+//   - price: number (required)
+//   - initialStock: number
+//   - currentStock: number
+//   - minStock: number
+//   - fromHpp: bool
+//
+// Collection: /users/{uid}/hpp
+// Document ID: {productId}
+// Fields:
+//   - id: string (required)
+//   - nama: string (required)
+//   - varian: list (required)
+//
+// Collection: /users/{uid}/transaksi
+// Document ID: {transactionId}
+// Fields:
+//   - id: string (required)
+//   - tanggal: string (required, YYYY-MM-DD)
+//   - jenis: string (required, 'Pemasukan' | 'Pengeluaran')
+//   - nominal: number (required)
+//   - kategori: string
+//   - qty_total: number
+//   - qty_beli: number
+//   - penjualan_detail: list
+//   - stockSnapshot: list
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    // Validation Helpers
+    function isValidString(val, min, max) {
+      return val is string && val.size() >= min && val.size() <= max;
+    }
+
+    function isValidNumber(val) {
+      return val is number;
+    }
+
+    // User Data Rules
+    match /users/{uid}/{document=**} {
+      // User can only access their own data
+      allow read, write: if isOwner(uid);
+    }
+    
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
