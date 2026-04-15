@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { StoreSettings } from '../types';
 import { toast } from 'sonner';
-import { Store, Upload, X, Save, ArrowLeft } from 'lucide-react';
+import { Store, Upload, X, Save, ArrowLeft, Settings2 } from 'lucide-react';
 
 import { auth, db, doc, setDoc, OperationType, handleFirestoreError } from '../lib/firebase';
 
@@ -14,11 +14,13 @@ interface StoreSettingsManagerProps {
   settings: StoreSettings;
   setSettings: React.Dispatch<React.SetStateAction<StoreSettings>>;
   onBack: () => void;
+  onManageCategories: () => void;
 }
 
-export default function StoreSettingsManager({ settings, setSettings, onBack }: StoreSettingsManagerProps) {
+export default function StoreSettingsManager({ settings, setSettings, onBack, onManageCategories }: StoreSettingsManagerProps) {
   const user = auth.currentUser;
   const [localSettings, setLocalSettings] = React.useState<StoreSettings>(settings);
+  const [isSaving, setIsSaving] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -33,18 +35,29 @@ export default function StoreSettingsManager({ settings, setSettings, onBack }: 
   };
 
   const handleSave = async () => {
+    setIsSaving(true);
+    
+    // Optimistic update
+    setSettings(localSettings);
+    
     if (user) {
-      try {
-        await setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), localSettings);
-        toast.success('Pengaturan toko berhasil disimpan ✓');
-        onBack();
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/profil_toko/settings`);
-      }
+      // Background sync
+      setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), localSettings)
+        .then(() => {
+          console.log('Settings synced successfully');
+        })
+        .catch(error => {
+          handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/profil_toko/settings`);
+          toast.error('Gagal sinkronisasi pengaturan ke cloud.');
+        });
+      
+      toast.success('Pengaturan toko berhasil disimpan ✓');
+      setIsSaving(false);
+      onBack();
     } else {
-      setSettings(localSettings);
       localStorage.setItem('cireng_store_settings', JSON.stringify(localSettings));
       toast.success('Pengaturan toko berhasil disimpan ✓');
+      setIsSaving(false);
       onBack();
     }
   };
@@ -236,7 +249,31 @@ export default function StoreSettingsManager({ settings, setSettings, onBack }: 
           </CardContent>
         </Card>
 
-        {/* D. Tombol Aksi */}
+        {/* D. KELOLA KATEGORI */}
+        <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
+          <CardHeader className="bg-white border-b border-gray-50">
+            <CardTitle className="text-xl font-black flex items-center gap-2">
+              <Settings2 className="w-5 h-5 text-[#FF6B35]" />
+              Kustomisasi Kategori
+            </CardTitle>
+            <CardDescription>Atur kategori HPP, Produk, dan Satuan Unit</CardDescription>
+          </CardHeader>
+          <CardContent className="p-6">
+            <Button 
+              onClick={onManageCategories}
+              variant="outline"
+              className="w-full h-14 rounded-2xl font-bold border-orange-100 text-[#FF6B35] hover:bg-orange-50 flex items-center justify-between px-6"
+            >
+              <div className="flex items-center gap-3">
+                <Settings2 className="w-5 h-5" />
+                <span>Kelola Kategori & Label</span>
+              </div>
+              <ArrowLeft className="w-5 h-5 rotate-180" />
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* E. Tombol Aksi */}
         <div className="flex flex-col sm:flex-row gap-3 pt-4">
           <Button 
             variant="outline" 
@@ -247,9 +284,10 @@ export default function StoreSettingsManager({ settings, setSettings, onBack }: 
           </Button>
           <Button 
             onClick={handleSave}
+            disabled={isSaving}
             className="flex-1 h-14 rounded-2xl font-bold orange-gradient text-white shadow-lg shadow-orange-200"
           >
-            Simpan Perubahan
+            {isSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
           </Button>
         </div>
       </div>

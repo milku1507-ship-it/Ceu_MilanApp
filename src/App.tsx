@@ -6,6 +6,7 @@ import StockManager from './components/StockManager';
 import TransactionManager from './components/TransactionManager';
 import FinancialReport from './components/FinancialReport';
 import StoreSettingsManager from './components/StoreSettingsManager';
+import CategoryManager from './components/CategoryManager';
 import { INITIAL_INGREDIENTS, INITIAL_PRODUCTS, SAMPLE_TRANSACTIONS } from './constants/data';
 import { Ingredient, Product, Transaction, StoreSettings } from './types';
 import { Toaster } from '@/components/ui/sonner';
@@ -13,22 +14,31 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { Store, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { auth, db, onAuthStateChanged, doc, collection, onSnapshot, setDoc, writeBatch, User, OperationType, handleFirestoreError } from './lib/firebase';
+import { auth, db, onAuthStateChanged, doc, collection, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, serverTimestamp, User, OperationType, handleFirestoreError } from './lib/firebase';
 import LoginPage from './components/LoginPage';
-import MigrationModal from './components/MigrationModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
+import { SettingsProvider } from './SettingsContext';
+
 export default function App() {
+  return (
+    <SettingsProvider>
+      <AppContent />
+    </SettingsProvider>
+  );
+}
+
+function AppContent() {
   const [user, setUser] = React.useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = React.useState(false);
-  const [showMigration, setShowMigration] = React.useState(false);
+  const [isCloudSyncing, setIsCloudSyncing] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState('dashboard');
   const [backAction, setBackAction] = React.useState<(() => void) | null>(null);
   
   // State
-  const [ingredients, setIngredients] = React.useState<Ingredient[]>(INITIAL_INGREDIENTS);
-  const [products, setProducts] = React.useState<Product[]>(INITIAL_PRODUCTS);
-  const [transactions, setTransactions] = React.useState<Transaction[]>(SAMPLE_TRANSACTIONS);
+  const [ingredients, setIngredients] = React.useState<Ingredient[]>([]);
+  const [products, setProducts] = React.useState<Product[]>([]);
+  const [transactions, setTransactions] = React.useState<Transaction[]>([]);
   const [storeSettings, setStoreSettings] = React.useState<StoreSettings>({
     name: 'Ceumilan Pay',
     showLogoOnReceipt: true,
@@ -36,23 +46,41 @@ export default function App() {
     showAddressOnReceipt: true,
     showLogoInHeader: true,
     showLogoInSidebar: true,
-    receiptFooter: 'Terima kasih sudah berbelanja!'
+    receiptFooter: 'Terima kasih sudah berbelanja!',
+    onboardingCompleted: false
   });
 
   // Auth Listener
   React.useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       setIsAuthReady(true);
-      
       if (currentUser) {
-        // Check if local data exists for migration
+        setIsCloudSyncing(true);
+        
+        // Silent automatic migration if local data exists
         const hasLocalData = localStorage.getItem('cireng_ingredients') || 
                             localStorage.getItem('cireng_produk') || 
                             localStorage.getItem('cireng_transactions');
         
         if (hasLocalData) {
-          setShowMigration(true);
+          handleMigrate(currentUser);
+        }
+
+        try {
+          // setupNewUser logic
+          const userRef = doc(db, 'users', currentUser.uid);
+          const userSnap = await getDoc(userRef);
+          if (!userSnap.exists()) {
+            await setDoc(userRef, {
+              nama: currentUser.displayName,
+              email: currentUser.email,
+              foto: currentUser.photoURL,
+              createdAt: serverTimestamp()
+            });
+          }
+        } catch (error) {
+          console.warn('Initial user setup failed (might be offline):', error);
         }
       }
     });
@@ -76,7 +104,11 @@ export default function App() {
     const unsubIngredients = onSnapshot(collection(db, `users/${uid}/stok`), (snapshot) => {
       const data = snapshot.docs.map(doc => doc.data() as Ingredient);
       setIngredients(data);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, `users/${uid}/stok`));
+      setIsCloudSyncing(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `users/${uid}/stok`);
+      setIsCloudSyncing(false);
+    });
 
     // Sync Products
     const unsubProducts = onSnapshot(collection(db, `users/${uid}/hpp`), (snapshot) => {
@@ -100,6 +132,70 @@ export default function App() {
     };
   }, [user]);
 
+  // Data Persistence (Local Storage for guest users)
+  React.useEffect(() => {
+    if (isAuthReady && !user) {
+      const localIng = localStorage.getItem('cireng_ingredients');
+      const localProd = localStorage.getItem('cireng_produk');
+      const localTx = localStorage.getItem('cireng_transactions');
+      const localSettings = localStorage.getItem('cireng_store_settings');
+
+      if (localIng) setIngredients(JSON.parse(localIng));
+      else setIngredients(INITIAL_INGREDIENTS);
+
+      if (localProd) setProducts(JSON.parse(localProd));
+      else setProducts(INITIAL_PRODUCTS);
+
+      if (localTx) setTransactions(JSON.parse(localTx));
+      else setTransactions(SAMPLE_TRANSACTIONS);
+
+      if (localSettings) setStoreSettings(JSON.parse(localSettings));
+    }
+  }, [user, isAuthReady]);
+
+  // Save to Local Storage
+  React.useEffect(() => {
+    if (isAuthReady) {
+      // Always save settings for branding persistence
+      localStorage.setItem('cireng_store_settings', JSON.stringify(storeSettings));
+      
+      // Only save data for guest users
+      if (!user) {
+        localStorage.setItem('cireng_ingredients', JSON.stringify(ingredients));
+        localStorage.setItem('cireng_produk', JSON.stringify(products));
+        localStorage.setItem('cireng_transactions', JSON.stringify(transactions));
+      }
+    }
+  }, [ingredients, products, transactions, storeSettings, user, isAuthReady]);
+
+  // Auto-complete onboarding if data exists in cloud
+  React.useEffect(() => {
+    if (user && !storeSettings.onboardingCompleted && (ingredients.length > 0 || transactions.length > 0)) {
+      const markOnboardingDone = async () => {
+        try {
+          const newSettings = { ...storeSettings, onboardingCompleted: true };
+          await setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), newSettings);
+          setStoreSettings(newSettings);
+        } catch (e) {
+          console.warn('Auto-onboarding update failed:', e);
+        }
+      };
+      markOnboardingDone();
+    }
+  }, [user, ingredients.length, transactions.length, storeSettings.onboardingCompleted]);
+
+  // Auto-seed data if user just logged in and has no data (requested by user)
+  React.useEffect(() => {
+    // Only attempt if we are sure we are logged in, auth is ready, and cloud sync (initial fetch) is done
+    if (user && isAuthReady && !isCloudSyncing) {
+      // If after syncing, both ingredients and transactions are still empty, and onboarding not done
+      if (ingredients.length === 0 && transactions.length === 0 && !storeSettings.onboardingCompleted) {
+        console.log('Account is empty, seeding sample data...');
+        seedCloudData();
+      }
+    }
+  }, [user, isAuthReady, isCloudSyncing, ingredients.length, transactions.length, storeSettings.onboardingCompleted]);
+
   // Data Persistence (Write to Firestore)
   const updateStoreSettings = async (newSettings: StoreSettings) => {
     if (!user) return;
@@ -122,9 +218,10 @@ export default function App() {
   };
 
   // Migration Logic
-  const handleMigrate = async () => {
-    if (!user) return;
-    const uid = user.uid;
+  const handleMigrate = async (targetUser?: User | null) => {
+    const activeUser = targetUser || user;
+    if (!activeUser) return;
+    const uid = activeUser.uid;
     const batch = writeBatch(db);
 
     try {
@@ -140,15 +237,15 @@ export default function App() {
       }
 
       localIngredients.forEach((ing: Ingredient) => {
-        batch.set(doc(db, `users/${uid}/stok/${ing.id}`), ing);
+        batch.set(doc(db, `users/${uid}/stok/${ing.id}`), JSON.parse(JSON.stringify(ing)));
       });
 
       localProducts.forEach((prod: Product) => {
-        batch.set(doc(db, `users/${uid}/hpp/${prod.id}`), prod);
+        batch.set(doc(db, `users/${uid}/hpp/${prod.id}`), JSON.parse(JSON.stringify(prod)));
       });
 
       localTransactions.forEach((tx: Transaction) => {
-        batch.set(doc(db, `users/${uid}/transaksi/${tx.id}`), tx);
+        batch.set(doc(db, `users/${uid}/transaksi/${tx.id}`), JSON.parse(JSON.stringify(tx)));
       });
 
       await batch.commit();
@@ -159,141 +256,189 @@ export default function App() {
       localStorage.removeItem('cireng_transactions');
       localStorage.removeItem('cireng_store_settings');
       
-      setShowMigration(false);
-      toast.success('Data berhasil dipindahkan ke akun Google kamu!');
+      console.log('Migration completed automatically');
     } catch (error) {
       console.error('Migration error:', error);
-      toast.error('Gagal memindahkan data.');
     }
   };
 
-  const handleSkipMigration = () => {
-    localStorage.removeItem('cireng_ingredients');
-    localStorage.removeItem('cireng_produk');
-    localStorage.removeItem('cireng_transactions');
-    localStorage.removeItem('cireng_store_settings');
-    setShowMigration(false);
-    toast.info('Memulai dengan data baru.');
+  // Removed handleSkipMigration as it's no longer needed
+
+  const seedCloudData = async () => {
+    if (!user) return;
+    const uid = user.uid;
+    const batch = writeBatch(db);
+    
+    try {
+      INITIAL_INGREDIENTS.forEach(ing => {
+        batch.set(doc(db, `users/${uid}/stok/${ing.id}`), JSON.parse(JSON.stringify(ing)));
+      });
+      INITIAL_PRODUCTS.forEach(p => {
+        batch.set(doc(db, `users/${uid}/hpp/${p.id}`), JSON.parse(JSON.stringify(p)));
+      });
+      SAMPLE_TRANSACTIONS.forEach(t => {
+        batch.set(doc(db, `users/${uid}/transaksi/${t.id}`), JSON.parse(JSON.stringify(t)));
+      });
+      
+      // Mark onboarding as completed
+      const newSettings = { 
+        ...storeSettings, 
+        onboardingCompleted: true,
+        name: storeSettings.name || 'Ceumilan Pay'
+      };
+      batch.set(doc(db, `users/${uid}/profil_toko/settings`), newSettings);
+      
+      await batch.commit();
+      setStoreSettings(newSettings);
+      toast.success('Data contoh berhasil dimuat ke akun Google kamu! ✓');
+    } catch (error) {
+      console.error('Seeding error:', error);
+      toast.error('Gagal memuat data contoh.');
+    }
+  };
+
+  const handleStartFresh = async () => {
+    if (!user) {
+      handleTabChange('hpp');
+      return;
+    }
+    try {
+      const newSettings = { ...storeSettings, onboardingCompleted: true };
+      await setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), newSettings);
+      setStoreSettings(newSettings);
+      handleTabChange('hpp');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/profil_toko/settings`);
+    }
   };
 
   // Sync logic
-  const syncHppToStock = React.useCallback(async (isManualCleanup = false) => {
-    // 1. Collect all unique materials from HPP
-    const hppMaterialsMap = new Map<string, {
-      id?: string;
-      nama: string;
-      satuan: string;
-      harga: number;
-      kelompok: string;
-    }>();
-
-    products.forEach(product => {
-      product.varian.forEach(variant => {
-        variant.bahan.forEach(bahan => {
-          const nameLower = bahan.nama.toLowerCase().trim();
-          if (nameLower === '') return;
-
-          if (!hppMaterialsMap.has(nameLower)) {
-            // Normalize category
-            let category = bahan.kelompok || 'Lainnya';
-            if (category === 'Kulit') category = 'Kulit Cireng';
-            if (category === 'Isian') category = 'Bahan Isian';
-            if (category === 'Operasional') category = 'Overhead';
-            
-            hppMaterialsMap.set(nameLower, { ...bahan, kelompok: category });
-          }
-        });
-      });
-    });
-
-    // 2. Process all existing ingredients
-    const matchedHppNames = new Set<string>();
-    let orphanedCount = 0;
-    const batch = user ? writeBatch(db) : null;
-    let hasChanges = false;
-    
-    const processedIngredients = ingredients.map(ing => {
-      const nameLower = ing.name.toLowerCase().trim();
-      const hppData = hppMaterialsMap.get(nameLower);
-
-      if (hppData) {
-        // Match found in HPP: Update and mark as fromHpp
-        matchedHppNames.add(nameLower);
-        const updatedIng = {
-          ...ing,
-          name: hppData.nama,
-          price: hppData.harga,
-          category: hppData.kelompok,
-          unit: hppData.satuan,
-          fromHpp: true
-        };
-        
-        if (JSON.stringify(updatedIng) !== JSON.stringify(ing)) {
-          hasChanges = true;
-          if (batch && user) batch.set(doc(db, `users/${user.uid}/stok/${ing.id}`), updatedIng);
-        }
-        return updatedIng;
-      } else {
-        // No match in HPP
-        if (ing.fromHpp) {
-          if (isManualCleanup) {
-            hasChanges = true;
-            if (batch && user) batch.delete(doc(db, `users/${user.uid}/stok/${ing.id}`));
-            return null;
-          }
-          orphanedCount++;
-          return ing;
-        }
-        // Manual item: Keep as is
-        return ing;
-      }
-    }).filter((ing): ing is Ingredient => ing !== null);
-
-    // 3. Add new ingredients from HPP
-    const finalIngredients = [...processedIngredients];
-    
-    hppMaterialsMap.forEach((hppData, nameLower) => {
-      if (!matchedHppNames.has(nameLower)) {
-        const newIng: Ingredient = {
-          id: hppData.id || 'ing_' + Math.random().toString(36).substr(2, 9),
-          name: hppData.nama,
-          unit: hppData.satuan,
-          price: hppData.harga,
-          initialStock: 0,
-          currentStock: 0,
-          minStock: 0,
-          category: hppData.kelompok,
-          fromHpp: true
-        };
-        finalIngredients.push(newIng);
-        hasChanges = true;
-        if (batch && user) batch.set(doc(db, `users/${user.uid}/stok/${newIng.id}`), newIng);
-      }
-    });
-
-    if (hasChanges) {
-      if (batch && user) {
+  const syncHppToStock = React.useCallback(async () => {
+    if (!user) return;
+    try {
+      const allMaterials = products.flatMap(p => p.varian.flatMap(v => v.bahan || []));
+      const uniqueMaterials = Array.from(new Map(allMaterials.map(m => [m.nama.toLowerCase().trim(), m])).values()) as any[];
+      
+      // Safer ID generation for non-ASCII characters
+      const generateId = (name: string) => {
+        const cleanName = name.toLowerCase().trim();
         try {
-          await batch.commit();
-        } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/stok/sync`);
+          // Use a simple hash or safe base64
+          return 'ing_' + btoa(unescape(encodeURIComponent(cleanName))).substring(0, 12).replace(/[+/=]/g, '');
+        } catch (e) {
+          // Fallback if btoa fails
+          return 'ing_' + cleanName.replace(/[^a-z0-9]/g, '').substring(0, 12);
         }
-      } else if (!user) {
-        setIngredients(finalIngredients);
+      };
+
+      const validMaterialIds = new Set(uniqueMaterials.map(m => generateId(m.nama)));
+
+      const batch = writeBatch(db);
+      let hasChanges = false;
+
+      // 1. Sync/Add from HPP to Stock
+      for (const m of uniqueMaterials) {
+        if (!m.nama || !m.nama.trim()) continue;
+        
+        const stockId = generateId(m.nama);
+        const stockRef = doc(db, `users/${user.uid}/stok/${stockId}`);
+        
+        const existingIng = ingredients.find(i => i.id === stockId);
+        
+        if (existingIng) {
+          if (existingIng.category !== m.kelompok || existingIng.price !== m.harga || existingIng.unit !== m.satuan || existingIng.name !== m.nama) {
+            batch.update(stockRef, {
+              name: m.nama,
+              category: m.kelompok,
+              price: m.harga,
+              unit: m.satuan
+            });
+            hasChanges = true;
+          }
+        } else {
+          batch.set(stockRef, {
+            id: stockId,
+            name: m.nama,
+            category: m.kelompok,
+            unit: m.satuan,
+            price: m.harga,
+            initialStock: 0,
+            currentStock: 0,
+            minStock: 0,
+            fromHpp: true
+          });
+          hasChanges = true;
+        }
       }
-    }
 
-    if (!isManualCleanup && orphanedCount > 0 && activeTab === 'stock') {
-      toast.warning(`${orphanedCount} bahan di Stok tidak terdaftar di HPP.`, {
-        description: "Gunakan tombol 'Bersihkan Stok' untuk menghapus bahan yang tidak sinkron.",
-        duration: 5000
-      });
+      // 2. Automatic Cleanup
+      const orphanedIngredients = ingredients.filter(i => i.fromHpp && !validMaterialIds.has(i.id));
+      if (orphanedIngredients.length > 0) {
+        orphanedIngredients.forEach(i => {
+          batch.delete(doc(db, `users/${user.uid}/stok/${i.id}`));
+        });
+        hasChanges = true;
+      }
+      
+      if (hasChanges) {
+        console.log('Syncing HPP to Stock...');
+        await batch.commit();
+        console.log('Sync HPP to Stock completed');
+      }
+    } catch (error) {
+      console.warn('Sync HPP to Stock failed:', error);
     }
-  }, [products, ingredients, user, activeTab]);
+  }, [user, products, ingredients]);
 
+  // Trigger sync when products change
   React.useEffect(() => {
-    syncHppToStock();
-  }, [products]); // Only sync when products change
+    const timer = setTimeout(() => {
+      syncHppToStock();
+    }, 2000); // 2s debounce
+    return () => clearTimeout(timer);
+  }, [products, syncHppToStock]);
+
+  const deleteFromStock = React.useCallback(async (materialName: string) => {
+    if (!user || !materialName) return;
+    const cleanName = materialName.toLowerCase().trim();
+    let stockId = '';
+    try {
+      stockId = 'ing_' + btoa(unescape(encodeURIComponent(cleanName))).substring(0, 12).replace(/[+/=]/g, '');
+    } catch (e) {
+      stockId = 'ing_' + cleanName.replace(/[^a-z0-9]/g, '').substring(0, 12);
+    }
+    try {
+      await deleteDoc(doc(db, `users/${user.uid}/stok/${stockId}`));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/stok/${stockId}`);
+    }
+  }, [user]);
+
+  const handleResetStockQty = () => {
+    try {
+      // Optimistic update for all users
+      const resetIngredients = ingredients.map(i => ({ ...i, currentStock: 0 }));
+      setIngredients(resetIngredients);
+      toast.success('Semua kuantitas stok berhasil dikosongkan ✓');
+
+      if (user) {
+        const batch = writeBatch(db);
+        ingredients.forEach(i => {
+          batch.update(doc(db, `users/${user.uid}/stok/${i.id}`), { currentStock: 0 });
+        });
+        
+        // Background sync
+        batch.commit().catch(error => {
+          console.error('Reset stock batch failed:', error);
+          toast.error('Gagal sinkronisasi stok ke cloud.');
+        });
+      }
+    } catch (error) {
+      console.error('Reset stock failed:', error);
+      if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/stok/reset`);
+      toast.error('Gagal mengosongkan stok.');
+    }
+  };
 
   const handleResetData = async () => {
     if (user) {
@@ -301,15 +446,18 @@ export default function App() {
         const batch = writeBatch(db);
         
         // Delete all data for user
-        // Note: Firestore doesn't support bulk delete of a collection without knowing IDs
-        // We use the current state to identify IDs
         ingredients.forEach(ing => batch.delete(doc(db, `users/${user.uid}/stok/${ing.id}`)));
         products.forEach(p => batch.delete(doc(db, `users/${user.uid}/hpp/${p.id}`)));
         transactions.forEach(t => batch.delete(doc(db, `users/${user.uid}/transaksi/${t.id}`)));
-        batch.delete(doc(db, `users/${user.uid}/profil_toko/settings`));
+        
+        // Keep settings but mark as onboarding completed to prevent re-seeding
+        batch.set(doc(db, `users/${user.uid}/profil_toko/settings`), {
+          ...storeSettings,
+          onboardingCompleted: true
+        });
 
         await batch.commit();
-        toast.success('Semua data cloud berhasil dihapus.');
+        toast.success('Semua data cloud berhasil dikosongkan.');
       } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/reset`);
       }
@@ -329,30 +477,64 @@ export default function App() {
 
   if (!isAuthReady) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F5F7FA]">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#F5F7FA] space-y-4">
         <div className="w-12 h-12 border-4 border-orange-200 border-t-[#FF6B35] rounded-full animate-spin" />
       </div>
     );
   }
 
   if (!user) {
-    return <LoginPage />;
+    return <LoginPage settings={storeSettings} />;
   }
 
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard user={user} ingredients={ingredients} transactions={transactions} setActiveTab={handleTabChange} />;
+        return <Dashboard 
+          user={user} 
+          ingredients={ingredients} 
+          transactions={transactions} 
+          storeSettings={storeSettings}
+          setActiveTab={handleTabChange} 
+          onSeedData={seedCloudData}
+          onStartFresh={handleStartFresh}
+        />;
       case 'hpp':
-        return <HPPManager user={user} products={products} setProducts={setProducts} ingredients={ingredients} setIngredients={setIngredients} onSetBack={setBackAction} />;
+        return <HPPManager 
+          user={user} 
+          products={products} 
+          setProducts={setProducts} 
+          ingredients={ingredients} 
+          setIngredients={setIngredients} 
+          onSetBack={setBackAction}
+          onDeleteFromStock={deleteFromStock}
+        />;
       case 'stock':
-        return <StockManager user={user} ingredients={ingredients} setIngredients={setIngredients} onSync={() => syncHppToStock(true)} />;
+        return (
+          <StockManager 
+            user={user} 
+            ingredients={ingredients} 
+            setIngredients={setIngredients} 
+            transactions={transactions}
+            onResetQty={handleResetStockQty} 
+          />
+        );
       case 'transactions':
-        return <TransactionManager user={user} transactions={transactions} setTransactions={setTransactions} products={products} ingredients={ingredients} setIngredients={setIngredients} />;
+        return <TransactionManager 
+          user={user} 
+          transactions={transactions} 
+          setTransactions={setTransactions} 
+          products={products} 
+          ingredients={ingredients} 
+          setIngredients={setIngredients} 
+          onSuccess={() => handleTabChange('dashboard')}
+        />;
       case 'reports':
         return <FinancialReport transactions={transactions} products={products} />;
       case 'store-settings':
-        return <StoreSettingsManager settings={storeSettings} setSettings={updateStoreSettings} onBack={() => handleTabChange('dashboard')} />;
+        return <StoreSettingsManager settings={storeSettings} setSettings={updateStoreSettings} onBack={() => handleTabChange('dashboard')} onManageCategories={() => handleTabChange('category-settings')} />;
+      case 'category-settings':
+        return <CategoryManager onBack={() => handleTabChange('store-settings')} />;
       case 'products':
       case 'notifications':
       case 'receipt-settings':
@@ -374,9 +556,21 @@ export default function App() {
             </div>
           );
         }
-        return <Dashboard user={user} ingredients={ingredients} transactions={transactions} setActiveTab={handleTabChange} />;
+        return <Dashboard 
+          user={user} 
+          ingredients={ingredients} 
+          transactions={transactions} 
+          storeSettings={storeSettings}
+          setActiveTab={handleTabChange} 
+        />;
       default:
-        return <Dashboard user={user} ingredients={ingredients} transactions={transactions} setActiveTab={handleTabChange} />;
+        return <Dashboard 
+          user={user} 
+          ingredients={ingredients} 
+          transactions={transactions} 
+          storeSettings={storeSettings}
+          setActiveTab={handleTabChange} 
+        />;
     }
   };
 
@@ -392,9 +586,6 @@ export default function App() {
         user={user}
       >
         <Toaster position="top-center" richColors />
-        {showMigration && (
-          <MigrationModal onMigrate={handleMigrate} onSkip={handleSkipMigration} />
-        )}
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}

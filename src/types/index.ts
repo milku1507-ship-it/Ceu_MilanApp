@@ -51,14 +51,23 @@ export type PenjualanDetail = {
 export type Transaction = {
   id: string;
   tanggal: string;
+  tanggal_akhir?: string;
   keterangan: string;
   kategori: string;
   jenis: 'Pemasukan' | 'Pengeluaran';
+  type?: 'pemasukan' | 'pengeluaran'; // Alias for compatibility
   nominal: number;
   qty_total: number;
   qty_beli: number;
   penjualan_detail?: PenjualanDetail[];
   stockSnapshot?: { ingredientId: string; stockBefore: number; delta: number }[];
+  createdAt?: any;
+};
+
+export type KategoriSettings = {
+  kategori_hpp: string[];
+  kategori_produk: string[];
+  satuan_unit: string[];
 };
 
 export type StoreSettings = {
@@ -73,4 +82,5 @@ export type StoreSettings = {
   showLogoInHeader: boolean;
   showLogoInSidebar: boolean;
   receiptFooter?: string;
+  onboardingCompleted?: boolean;
 };

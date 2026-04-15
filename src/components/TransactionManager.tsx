@@ -19,8 +19,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import { auth, db, doc, setDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError } from '../lib/firebase';
+import { auth, db, doc, setDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError, serverTimestamp, increment } from '../lib/firebase';
 import { User } from 'firebase/auth';
+import { useSettings } from '../SettingsContext';
+import { formatSmartUnit } from '../lib/unitUtils';
+import { formatCompactNumber } from '../lib/formatUtils';
 
 interface TransactionManagerProps {
   user: User | null;
@@ -29,6 +32,7 @@ interface TransactionManagerProps {
   products: Product[];
   ingredients: Ingredient[];
   setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>;
+  onSuccess?: () => void;
 }
 
 const CATEGORIES = [
@@ -43,7 +47,7 @@ const CATEGORIES = [
   { name: 'Lainnya', type: 'Pengeluaran', fixed: false },
 ];
 
-export default function TransactionManager({ user, transactions, setTransactions, products, ingredients, setIngredients }: TransactionManagerProps) {
+export default function TransactionManager({ user, transactions, setTransactions, products, ingredients, setIngredients, onSuccess }: TransactionManagerProps) {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState('Semua');
   
@@ -68,6 +72,9 @@ export default function TransactionManager({ user, transactions, setTransactions
   const [selectedProductIds, setSelectedProductIds] = React.useState<string[]>([]);
 
   const [selectedTxIds, setSelectedTxIds] = React.useState<string[]>([]);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [isDeleting, setIsDeleting] = React.useState(false);
+  const [isRange, setIsRange] = React.useState(false);
 
   const filteredTransactions = transactions
     .filter(t => {
@@ -112,7 +119,7 @@ export default function TransactionManager({ user, transactions, setTransactions
         setNewTx(prev => ({
           ...prev,
           nominal: (prev.qty_beli || 0) * material.price,
-          keterangan: `${prev.kategori}: ${material.name} (${prev.qty_beli} ${material.unit})`
+          keterangan: `${prev.kategori}: ${material.name} (${formatSmartUnit(prev.qty_beli || 0, material.unit)})`
         }));
       }
     }
@@ -180,76 +187,105 @@ export default function TransactionManager({ user, transactions, setTransactions
   };
 
   const handleAddTransaction = async () => {
+    if (isSaving) return;
     if (!newTx.keterangan || !newTx.nominal) {
       toast.error('Mohon isi keterangan dan nominal!');
       return;
     }
 
-    // Identify affected ingredients and calculate snapshot
-    const snapshot: { ingredientId: string; stockBefore: number; delta: number }[] = [];
-    const stockUpdates: { id: string; delta: number }[] = [];
+    setIsSaving(true);
+    
+    try {
+      // Identify affected ingredients and calculate snapshot
+      const snapshot: { ingredientId: string; stockBefore: number; delta: number }[] = [];
+      const stockUpdates: { id: string; delta: number }[] = [];
 
-    if (newTx.kategori === 'Bahan Baku' || newTx.kategori === 'Packing') {
-      if (selectedMaterialId) {
-        const material = ingredients.find(i => i.id === selectedMaterialId);
-        if (material) {
-          const delta = newTx.qty_beli || 0;
-          snapshot.push({ ingredientId: material.id, stockBefore: material.currentStock, delta });
-          stockUpdates.push({ id: material.id, delta });
+      // Create a map for faster lookup
+      const ingredientMap = new Map(ingredients.map(i => [i.name.toLowerCase().trim(), i]));
+
+      if (newTx.kategori === 'Bahan Baku' || newTx.kategori === 'Packing') {
+        if (selectedMaterialId) {
+          const material = ingredients.find(i => i.id === selectedMaterialId);
+          if (material) {
+            const delta = newTx.qty_beli || 0;
+            snapshot.push({ ingredientId: material.id, stockBefore: material.currentStock || 0, delta });
+            stockUpdates.push({ id: material.id, delta });
+          }
         }
-      }
-    } else if (newTx.kategori === 'Penjualan' && newTx.penjualan_detail) {
-      newTx.penjualan_detail.forEach(pd => {
-        const product = products.find(p => p.id === pd.produk_id);
-        if (product) {
-          pd.varian.forEach(pv => {
-            if (pv.qty > 0) {
-              const variant = product.varian.find(v => v.id === pv.varian_id);
-              if (variant) {
-                variant.bahan.forEach(bahan => {
-                  const ingredient = ingredients.find(i => i.name.toLowerCase() === bahan.nama.toLowerCase());
-                  if (ingredient) {
-                    const totalUsage = bahan.qty * pv.qty;
-                    const delta = -totalUsage;
-                    
-                    const existingSnapshot = snapshot.find(s => s.ingredientId === ingredient.id);
-                    if (existingSnapshot) {
-                      existingSnapshot.delta += delta;
-                    } else {
-                      snapshot.push({ ingredientId: ingredient.id, stockBefore: ingredient.currentStock, delta });
+      } else if (newTx.kategori === 'Penjualan' && newTx.penjualan_detail) {
+        newTx.penjualan_detail.forEach(pd => {
+          const product = products.find(p => p.id === pd.produk_id);
+          if (product) {
+            pd.varian.forEach(pv => {
+              if (pv.qty > 0) {
+                const variant = product.varian.find(v => v.id === pv.varian_id);
+                if (variant && variant.bahan) {
+                  variant.bahan.forEach(bahan => {
+                    if (!bahan.nama) return;
+                    const ingredient = ingredientMap.get(bahan.nama.toLowerCase().trim());
+                    if (ingredient) {
+                      const totalUsage = (bahan.qty || 0) * pv.qty;
+                      const delta = -totalUsage;
+                      
+                      const existingSnapshot = snapshot.find(s => s.ingredientId === ingredient.id);
+                      if (existingSnapshot) {
+                        existingSnapshot.delta += delta;
+                      } else {
+                        snapshot.push({ ingredientId: ingredient.id, stockBefore: ingredient.currentStock || 0, delta });
+                      }
+                      
+                      const existingUpdate = stockUpdates.find(u => u.id === ingredient.id);
+                      if (existingUpdate) {
+                        existingUpdate.delta += delta;
+                      } else {
+                        stockUpdates.push({ id: ingredient.id, delta });
+                      }
                     }
-                    
-                    const existingUpdate = stockUpdates.find(u => u.id === ingredient.id);
-                    if (existingUpdate) {
-                      existingUpdate.delta += delta;
-                    } else {
-                      stockUpdates.push({ id: ingredient.id, delta });
-                    }
-                  }
-                });
+                  });
+                }
               }
+            });
+          }
+        });
+
+      }
+
+      const txId = Math.random().toString(36).substr(2, 9);
+      const tx: any = {
+        id: txId,
+        tanggal: newTx.tanggal || new Date().toISOString().split('T')[0],
+        tanggal_akhir: isRange ? newTx.tanggal_akhir : undefined,
+        keterangan: newTx.keterangan || '',
+        kategori: newTx.kategori || 'Lainnya',
+        jenis: newTx.jenis || 'Pengeluaran',
+        type: (newTx.jenis || 'Pengeluaran').toLowerCase() as 'pemasukan' | 'pengeluaran',
+        nominal: Number(newTx.nominal) || 0,
+        qty_total: newTx.qty_total || 0,
+        qty_beli: newTx.qty_beli || 0,
+        createdAt: serverTimestamp()
+      };
+
+      if (newTx.kategori === 'Penjualan' && newTx.penjualan_detail) {
+        tx.penjualan_detail = JSON.parse(JSON.stringify(newTx.penjualan_detail));
+      }
+
+      if (snapshot.length > 0) {
+        tx.stockSnapshot = snapshot;
+      }
+
+      if (user) {
+        // Optimistic update
+        if (stockUpdates.length > 0) {
+          setIngredients(prev => prev.map(ing => {
+            const update = stockUpdates.find(u => u.id === ing.id);
+            if (update) {
+              return { ...ing, currentStock: (ing.currentStock || 0) + update.delta };
             }
-          });
+            return ing;
+          }));
         }
-      });
-    }
+        setTransactions(prev => [tx, ...prev]);
 
-    const txId = Math.random().toString(36).substr(2, 9);
-    const tx: Transaction = {
-      id: txId,
-      tanggal: newTx.tanggal!,
-      keterangan: newTx.keterangan!,
-      kategori: newTx.kategori!,
-      jenis: newTx.jenis as 'Pemasukan' | 'Pengeluaran',
-      nominal: Number(newTx.nominal),
-      qty_total: newTx.qty_total || 0,
-      qty_beli: newTx.qty_beli || 0,
-      penjualan_detail: newTx.kategori === 'Penjualan' ? newTx.penjualan_detail : undefined,
-      stockSnapshot: snapshot.length > 0 ? snapshot : undefined
-    };
-
-    if (user) {
-      try {
         const batch = writeBatch(db);
         
         // Add transaction
@@ -257,45 +293,72 @@ export default function TransactionManager({ user, transactions, setTransactions
         
         // Update ingredients
         stockUpdates.forEach(update => {
-          const ing = ingredients.find(i => i.id === update.id);
-          if (ing) {
-            batch.set(doc(db, `users/${user.uid}/stok/${ing.id}`), {
-              ...ing,
-              currentStock: ing.currentStock + update.delta
-            });
-          }
+          batch.update(doc(db, `users/${user.uid}/stok/${update.id}`), {
+            currentStock: increment(update.delta)
+          });
         });
 
-        await batch.commit();
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/transaksi/${txId}`);
+        console.log('Committing batch...', { txId, stockUpdatesCount: stockUpdates.length });
+        
+        // Update UI immediately
+        setIsSaving(false);
+        toast.success('Transaksi berhasil dicatat! ✓');
+        if (onSuccess) onSuccess();
+        
+        // Commit in background
+        batch.commit().then(() => {
+          console.log('Batch committed successfully');
+        }).catch(error => {
+          console.error('Batch commit failed:', error);
+          toast.error('Gagal sinkronisasi transaksi ke cloud.', { description: 'Data mungkin tidak tersimpan permanen.' });
+        });
+      } else {
+        // Update ingredients state locally
+        if (stockUpdates.length > 0) {
+          setIngredients(prev => prev.map(ing => {
+            const update = stockUpdates.find(u => u.id === ing.id);
+            if (update) {
+              return { ...ing, currentStock: (ing.currentStock || 0) + update.delta };
+            }
+            return ing;
+          }));
+        }
+        setTransactions(prev => [tx, ...prev]);
+        toast.success('Transaksi berhasil dicatat! ✓');
+        if (onSuccess) onSuccess();
       }
-    } else {
-      // Update ingredients state locally
-      if (stockUpdates.length > 0) {
-        setIngredients(prev => prev.map(ing => {
-          const update = stockUpdates.find(u => u.id === ing.id);
-          if (update) {
-            return { ...ing, currentStock: ing.currentStock + update.delta };
-          }
-          return ing;
-        }));
-      }
-      setTransactions(prev => [tx, ...prev]);
-    }
 
-    toast.success('Transaksi berhasil dicatat!');
-    setNewTx({
-      tanggal: new Date().toISOString().split('T')[0],
-      jenis: 'Pemasukan',
-      kategori: 'Penjualan',
-      nominal: 0,
-      keterangan: '',
-      qty_total: 0,
-      qty_beli: 0,
-      penjualan_detail: []
-    });
-    setSelectedProductIds([]);
+      setSelectedMaterialId('');
+      setSelectedProductIds([]);
+      setSelectedTxIds([]);
+      setIsRange(false);
+      setNewTx({
+        tanggal: new Date().toISOString().split('T')[0],
+        tanggal_akhir: undefined,
+        jenis: 'Pemasukan',
+        kategori: 'Penjualan',
+        nominal: 0,
+        keterangan: '',
+        qty_total: 0,
+        qty_beli: 0,
+        penjualan_detail: []
+      });
+    } catch (error) {
+      console.error('Add Transaction Error:', error);
+      const errMessage = error instanceof Error ? error.message : String(error);
+      let displayError = errMessage;
+      try {
+        if (errMessage.startsWith('{')) {
+          displayError = JSON.parse(errMessage).error;
+        }
+      } catch (e) {}
+      
+      toast.error('Gagal menyimpan transaksi', {
+        description: displayError
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const deleteTransaction = async (id: string) => {
@@ -320,6 +383,8 @@ export default function TransactionManager({ user, transactions, setTransactions
 
   const confirmDelete = async (rollback: boolean) => {
     if (!txToDelete) return;
+    setIsDeleting(true);
+    const toastId = toast.loading(rollback ? 'Mengembalikan stok...' : 'Menghapus transaksi...');
 
     if (user) {
       try {
@@ -328,33 +393,30 @@ export default function TransactionManager({ user, transactions, setTransactions
         
         if (rollback && txToDelete.stockSnapshot) {
           txToDelete.stockSnapshot.forEach(snapshot => {
-            const ing = ingredients.find(i => i.id === snapshot.ingredientId);
-            if (ing) {
-              batch.set(doc(db, `users/${user.uid}/stok/${ing.id}`), {
-                ...ing,
-                currentStock: ing.currentStock - snapshot.delta
-              });
-            }
+            batch.update(doc(db, `users/${user.uid}/stok/${snapshot.ingredientId}`), {
+              currentStock: snapshot.stockBefore
+            });
           });
         }
         
         await batch.commit();
-        toast.success(rollback ? 'Transaksi dihapus dan stok berhasil dikembalikan' : 'Transaksi dihapus, stok tidak berubah');
+        toast.success(rollback ? 'Transaksi dihapus dan stok berhasil dikembalikan ✓' : 'Transaksi dihapus, stok tidak berubah', { id: toastId });
       } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/${txToDelete.id}`);
+        toast.error('Gagal menghapus transaksi', { id: toastId });
       }
     } else {
       if (rollback && txToDelete.stockSnapshot) {
         setIngredients(prev => prev.map(ing => {
           const snapshot = txToDelete.stockSnapshot?.find(s => s.ingredientId === ing.id);
           if (snapshot) {
-            return { ...ing, currentStock: ing.currentStock - snapshot.delta };
+            return { ...ing, currentStock: snapshot.stockBefore };
           }
           return ing;
         }));
-        toast.success('Transaksi dihapus dan stok berhasil dikembalikan');
+        toast.success('Transaksi dihapus dan stok berhasil dikembalikan ✓', { id: toastId });
       } else {
-        toast.success('Transaksi dihapus, stok tidak berubah');
+        toast.success('Transaksi dihapus, stok tidak berubah', { id: toastId });
       }
       setTransactions(prev => prev.filter(t => t.id !== txToDelete.id));
     }
@@ -362,6 +424,7 @@ export default function TransactionManager({ user, transactions, setTransactions
     setSelectedTxIds(prev => prev.filter(id => id !== txToDelete.id));
     setIsDeleteConfirmOpen(false);
     setTxToDelete(null);
+    setIsDeleting(false);
   };
 
   const toggleSelectTx = (id: string) => {
@@ -409,6 +472,8 @@ export default function TransactionManager({ user, transactions, setTransactions
 
   const confirmBulkDelete = async (rollback: boolean) => {
     if (!bulkToDelete) return;
+    setIsDeleting(true);
+    const toastId = toast.loading(rollback ? 'Mengembalikan stok massal...' : 'Menghapus transaksi massal...');
 
     if (user) {
       try {
@@ -428,18 +493,18 @@ export default function TransactionManager({ user, transactions, setTransactions
             }, 0);
 
             if (totalDelta !== 0) {
-              batch.set(doc(db, `users/${user.uid}/stok/${ing.id}`), {
-                ...ing,
-                currentStock: ing.currentStock - totalDelta
+              batch.update(doc(db, `users/${user.uid}/stok/${ing.id}`), {
+                currentStock: increment(-totalDelta)
               });
             }
           });
         }
 
         await batch.commit();
-        toast.success(rollback ? `${bulkToDelete.length} transaksi dihapus dan stok berhasil dikembalikan` : `${bulkToDelete.length} transaksi dihapus, stok tidak berubah`);
+        toast.success(rollback ? `${bulkToDelete.length} transaksi dihapus dan stok berhasil dikembalikan ✓` : `${bulkToDelete.length} transaksi dihapus, stok tidak berubah`, { id: toastId });
       } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/bulk`);
+        toast.error('Gagal menghapus transaksi massal', { id: toastId });
       }
     } else {
       if (rollback) {
@@ -457,9 +522,9 @@ export default function TransactionManager({ user, transactions, setTransactions
           }
           return ing;
         }));
-        toast.success(`${bulkToDelete.length} transaksi dihapus dan stok berhasil dikembalikan`);
+        toast.success(`${bulkToDelete.length} transaksi dihapus dan stok berhasil dikembalikan ✓`, { id: toastId });
       } else {
-        toast.success(`${bulkToDelete.length} transaksi dihapus, stok tidak berubah`);
+        toast.success(`${bulkToDelete.length} transaksi dihapus, stok tidak berubah`, { id: toastId });
       }
       setTransactions(prev => prev.filter(t => !bulkToDelete.includes(t.id)));
     }
@@ -467,6 +532,7 @@ export default function TransactionManager({ user, transactions, setTransactions
     setSelectedTxIds([]);
     setIsBulkDeleteConfirmOpen(false);
     setBulkToDelete(null);
+    setIsDeleting(false);
   };
 
   return (
@@ -479,24 +545,24 @@ export default function TransactionManager({ user, transactions, setTransactions
       </div>
 
       {/* Wallet Balance Summary */}
-      <div className="wallet-gradient rounded-[2.5rem] p-6 text-white shadow-xl shadow-blue-100 flex flex-col md:flex-row justify-between items-center gap-6">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl glass-card flex items-center justify-center">
-            <CreditCard className="w-6 h-6" />
+      <div className="wallet-gradient rounded-[2rem] md:rounded-[2.5rem] p-5 md:p-8 text-white shadow-xl shadow-blue-100 flex flex-col md:flex-row justify-between items-center gap-6">
+        <div className="flex items-center gap-4 w-full md:w-auto">
+          <div className="w-12 h-12 md:w-14 md:h-14 rounded-2xl glass-card flex items-center justify-center shrink-0">
+            <CreditCard className="w-6 h-6 md:w-7 md:h-7" />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Total Saldo</p>
-            <h3 className="text-3xl font-black">Rp {balance.toLocaleString()}</h3>
+            <h3 className="text-2xl md:text-4xl font-black truncate">Rp {balance.toLocaleString()}</h3>
           </div>
         </div>
-        <div className="flex gap-4 w-full md:w-auto">
-          <div className="flex-1 md:flex-none px-6 py-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/10">
+        <div className="flex gap-3 md:gap-4 w-full md:w-auto">
+          <div className="flex-1 md:flex-none px-4 md:px-6 py-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/10">
             <p className="text-[9px] font-bold uppercase opacity-70 mb-1">Pemasukan</p>
-            <p className="text-lg font-black text-green-300">Rp {totalIncome.toLocaleString()}</p>
+            <p className="text-base md:text-xl font-black text-green-300">Rp {totalIncome.toLocaleString()}</p>
           </div>
-          <div className="flex-1 md:flex-none px-6 py-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/10">
+          <div className="flex-1 md:flex-none px-4 md:px-6 py-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/10">
             <p className="text-[9px] font-bold uppercase opacity-70 mb-1">Pengeluaran</p>
-            <p className="text-lg font-black text-red-300">Rp {totalExpense.toLocaleString()}</p>
+            <p className="text-base md:text-xl font-black text-red-300">Rp {totalExpense.toLocaleString()}</p>
           </div>
         </div>
       </div>
@@ -510,13 +576,40 @@ export default function TransactionManager({ user, transactions, setTransactions
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label className="text-xs font-bold text-gray-400 uppercase">Tanggal</Label>
-              <Input 
-                type="date" 
-                value={newTx.tanggal}
-                onChange={(e) => setNewTx({...newTx, tanggal: e.target.value})}
-                className="rounded-xl border-gray-100"
-              />
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-bold text-gray-400 uppercase">Tanggal</Label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="range-toggle"
+                    checked={isRange}
+                    onChange={(e) => {
+                      setIsRange(e.target.checked);
+                      if (e.target.checked && !newTx.tanggal_akhir) {
+                        setNewTx(prev => ({ ...prev, tanggal_akhir: prev.tanggal }));
+                      }
+                    }}
+                    className="w-3 h-3 rounded border-gray-200 text-[#FF6B35] focus:ring-[#FF6B35]"
+                  />
+                  <label htmlFor="range-toggle" className="text-[10px] font-bold text-gray-400 uppercase cursor-pointer">Rentang</label>
+                </div>
+              </div>
+              <div className={cn("grid gap-2", isRange ? "grid-cols-2" : "grid-cols-1")}>
+                <Input 
+                  type="date" 
+                  value={newTx.tanggal}
+                  onChange={(e) => setNewTx({...newTx, tanggal: e.target.value})}
+                  className="rounded-xl border-gray-100"
+                />
+                {isRange && (
+                  <Input 
+                    type="date" 
+                    value={newTx.tanggal_akhir || newTx.tanggal}
+                    onChange={(e) => setNewTx({...newTx, tanggal_akhir: e.target.value})}
+                    className="rounded-xl border-gray-100"
+                  />
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -686,16 +779,20 @@ export default function TransactionManager({ user, transactions, setTransactions
                 value={newTx.nominal || ''}
                 onChange={(e) => setNewTx({...newTx, nominal: Number(e.target.value)})}
                 className="rounded-xl border-gray-100 font-black text-lg"
-                readOnly={newTx.kategori === 'Penjualan'}
               />
-              {newTx.kategori === 'Penjualan' && <p className="text-[10px] text-gray-400 italic">*Nominal terhitung otomatis dari qty varian</p>}
+              <p className="text-[10px] text-gray-400 italic">
+                {newTx.kategori === 'Penjualan' || newTx.kategori === 'Bahan Baku' || newTx.kategori === 'Packing' 
+                  ? '*Nominal terhitung otomatis, namun tetap bisa Anda ubah manual' 
+                  : '*Masukkan nominal transaksi'}
+              </p>
             </div>
 
             <Button 
               onClick={handleAddTransaction}
+              disabled={isSaving}
               className="w-full orange-gradient text-white font-bold h-14 rounded-2xl shadow-lg shadow-orange-100 mt-4 active:scale-95 transition-transform"
             >
-              Simpan Transaksi
+              {isSaving ? 'Menyimpan...' : 'Simpan Transaksi'}
             </Button>
           </CardContent>
         </Card>
@@ -743,7 +840,7 @@ export default function TransactionManager({ user, transactions, setTransactions
               />
             </div>
 
-            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+            <div className="space-y-4 max-h-[600px] overflow-y-auto pr-1 md:pr-2 custom-scrollbar">
               {filteredTransactions.map((t) => (
                 <div 
                   key={t.id} 
@@ -754,57 +851,67 @@ export default function TransactionManager({ user, transactions, setTransactions
                       : "bg-gray-50 border-transparent hover:bg-orange-50/50"
                   )}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <input 
-                        type="checkbox" 
-                        className="w-5 h-5 rounded-lg border-gray-200 text-[#FF6B35] focus:ring-[#FF6B35]"
-                        checked={selectedTxIds.includes(t.id)}
-                        onChange={() => toggleSelectTx(t.id)}
-                      />
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="pt-1">
+                        <input 
+                          type="checkbox" 
+                          className="w-5 h-5 rounded-lg border-gray-200 text-[#FF6B35] focus:ring-[#FF6B35] cursor-pointer"
+                          checked={selectedTxIds.includes(t.id)}
+                          onChange={() => toggleSelectTx(t.id)}
+                        />
+                      </div>
                       <div className={cn(
-                        "p-3 rounded-xl",
+                        "p-2.5 rounded-xl shrink-0",
                         t.jenis === 'Pemasukan' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-500"
                       )}>
                         {t.jenis === 'Pemasukan' ? <ArrowUpRight className="w-5 h-5" /> : <ArrowDownLeft className="w-5 h-5" />}
                       </div>
-                      <div>
-                        <p className="font-bold text-[#1A1A2E]">{t.keterangan}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Badge variant="outline" className="text-[10px] font-bold border-none bg-white text-gray-400 uppercase">
+                      <div className="min-w-0">
+                        <p className="font-bold text-[#1A1A2E] text-sm md:text-base leading-tight mb-1">{t.keterangan}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className="text-[9px] font-black border-none bg-white text-gray-400 uppercase px-2 py-0.5">
                             {t.kategori}
                           </Badge>
-                          <span className="text-[10px] text-gray-400 font-bold">{t.tanggal}</span>
+                          <span className="text-[10px] text-gray-400 font-bold flex items-center gap-1">
+                            <Calendar className="w-3 h-3" />
+                            {t.tanggal_akhir ? `${t.tanggal} - ${t.tanggal_akhir}` : t.tanggal}
+                          </span>
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <p className={cn(
-                          "font-black text-lg",
-                          t.jenis === 'Pemasukan' ? "text-green-600" : "text-red-500"
-                        )}>
-                          {t.jenis === 'Pemasukan' ? '+' : '-'} Rp {t.nominal.toLocaleString()}
-                        </p>
-                        {t.qty_total > 0 && <p className="text-[10px] font-bold text-gray-400">{t.qty_total} pcs terjual</p>}
+                    <div className="flex flex-col items-end shrink-0">
+                      <p className={cn(
+                        "font-black text-base md:text-lg leading-none",
+                        t.jenis === 'Pemasukan' ? "text-green-600" : "text-red-500"
+                      )}>
+                        {t.jenis === 'Pemasukan' ? '+' : '-'} Rp{formatCompactNumber(t.nominal)}
+                      </p>
+                      {t.qty_total > 0 && <p className="text-[10px] font-bold text-gray-400 mt-1">{t.qty_total} pcs terjual</p>}
+                      <div className="mt-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => deleteTransaction(t.id)}
+                          className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
                       </div>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => deleteTransaction(t.id)}
-                        className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
                     </div>
                   </div>
                   
                   {t.penjualan_detail && t.penjualan_detail.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-dashed border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {t.penjualan_detail.map((pd, pdIdx) => (
-                        <div key={`${pd.produk_id}-${pdIdx}`} className="text-[10px] text-gray-500">
-                          <span className="font-bold text-[#FF6B35]">{pd.produk_nama}: </span>
-                          {pd.varian.filter(v => v.qty > 0).map(v => `${v.varian_nama} (${v.qty})`).join(', ')}
+                    <div className="mt-3 pt-3 border-t border-dashed border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                      {Array.from(new Map(t.penjualan_detail.map(pd => [pd.produk_id, pd])).values()).map((pd, pdIdx) => (
+                        <div key={`${pd.produk_id}-${pdIdx}`} className="text-[10px] text-gray-500 bg-white/50 p-1.5 rounded-lg border border-gray-100/50 flex items-start gap-1.5">
+                          <Package className="w-3 h-3 text-[#FF6B35] shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <span className="font-black text-[#1A1A2E]">{pd.produk_nama}: </span>
+                            <span className="font-medium">
+                              {pd.varian.filter(v => v.qty > 0).map(v => `${v.varian_nama} (${v.qty})`).join(', ')}
+                            </span>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -835,15 +942,17 @@ export default function TransactionManager({ user, transactions, setTransactions
             <Button 
               variant="outline" 
               onClick={() => confirmDelete(false)}
+              disabled={isDeleting}
               className="rounded-2xl font-bold h-12 flex-1"
             >
               Tidak, Biarkan Stok
             </Button>
             <Button 
               onClick={() => confirmDelete(true)}
+              disabled={isDeleting}
               className="orange-gradient text-white font-bold rounded-2xl h-12 flex-1"
             >
-              Ya, Kembalikan Stok
+              {isDeleting ? 'Memproses...' : 'Ya, Kembalikan Stok'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -861,15 +970,17 @@ export default function TransactionManager({ user, transactions, setTransactions
             <Button 
               variant="outline" 
               onClick={() => confirmBulkDelete(false)}
+              disabled={isDeleting}
               className="rounded-2xl font-bold h-12 flex-1"
             >
               Tidak, Biarkan Stok
             </Button>
             <Button 
               onClick={() => confirmBulkDelete(true)}
+              disabled={isDeleting}
               className="orange-gradient text-white font-bold rounded-2xl h-12 flex-1"
             >
-              Ya, Kembalikan Stok
+              {isDeleting ? 'Memproses...' : 'Ya, Kembalikan Stok'}
             </Button>
           </DialogFooter>
         </DialogContent>

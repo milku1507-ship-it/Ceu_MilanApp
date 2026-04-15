@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/dialog";
 
 import { auth, db, doc, setDoc, deleteDoc, OperationType, handleFirestoreError } from '../lib/firebase';
+import { useSettings } from '../SettingsContext';
+import { formatSmartUnit } from '../lib/unitUtils';
 
 interface HPPManagerProps {
   user: User | null;
@@ -30,11 +32,13 @@ interface HPPManagerProps {
   ingredients: Ingredient[];
   setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>;
   onSetBack: React.Dispatch<React.SetStateAction<(() => void) | null>>;
+  onDeleteFromStock: (materialName: string) => Promise<void>;
 }
 
 type ViewState = 'products' | 'variants' | 'detail';
 
-export default function HPPManager({ user, products, setProducts, ingredients, setIngredients, onSetBack }: HPPManagerProps) {
+export default function HPPManager({ user, products, setProducts, ingredients, setIngredients, onSetBack, onDeleteFromStock }: HPPManagerProps) {
+  const { settings } = useSettings();
   const [view, setView] = React.useState<ViewState>('products');
   const [selectedProductId, setSelectedProductId] = React.useState<string | null>(null);
   const [selectedVariantId, setSelectedVariantId] = React.useState<string | null>(null);
@@ -48,6 +52,11 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   // Detail HPP State
   const [activeHppVariant, setActiveHppVariant] = React.useState<Variant | null>(null);
   const [isMaterialModalOpen, setIsMaterialModalOpen] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [isDeleteMaterialConfirmOpen, setIsDeleteMaterialConfirmOpen] = React.useState(false);
+  const [isDeleteCategoryConfirmOpen, setIsDeleteCategoryConfirmOpen] = React.useState(false);
+  const [materialToDelete, setMaterialToDelete] = React.useState<{ index: number, material: HppMaterial } | null>(null);
+  const [categoryToDelete, setCategoryToDelete] = React.useState<string | null>(null);
   const [editingMaterial, setEditingMaterial] = React.useState<{ material: HppMaterial, index: number } | null>(null);
 
   const selectedProduct = products.find(p => p.id === selectedProductId);
@@ -87,22 +96,28 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   // Product CRUD
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSaving(true);
     const formData = new FormData(e.target as HTMLFormElement);
     const nama = formData.get('nama') as string;
     const deskripsi = formData.get('deskripsi') as string;
 
     if (editingProduct) {
       const updatedProduct = { ...editingProduct, nama, deskripsi };
+      
+      // Optimistic update
+      setProducts(prev => prev.map(p => p.id === editingProduct.id ? updatedProduct : p));
+      toast.success('Produk diperbarui ✓');
+      setIsProductModalOpen(false);
+      setEditingProduct(null);
+      setIsSaving(false);
+
       if (user) {
-        try {
-          await setDoc(doc(db, `users/${user.uid}/hpp/${editingProduct.id}`), updatedProduct);
-        } catch (error) {
-          handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${editingProduct.id}`);
-        }
-      } else {
-        setProducts(prev => prev.map(p => p.id === editingProduct.id ? updatedProduct : p));
+        setDoc(doc(db, `users/${user.uid}/hpp/${editingProduct.id}`), updatedProduct)
+          .catch(error => {
+            handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${editingProduct.id}`);
+            toast.error('Gagal sinkronisasi produk ke cloud.');
+          });
       }
-      toast.success('Produk diperbarui');
     } else {
       const id = 'prod_' + Math.random().toString(36).substr(2, 9);
       const newProduct: Product = {
@@ -111,19 +126,22 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         deskripsi,
         varian: []
       };
+      
+      // Optimistic update
+      setProducts(prev => [...prev, newProduct]);
+      toast.success('Produk ditambahkan ✓');
+      setIsProductModalOpen(false);
+      setEditingProduct(null);
+      setIsSaving(false);
+
       if (user) {
-        try {
-          await setDoc(doc(db, `users/${user.uid}/hpp/${id}`), newProduct);
-        } catch (error) {
-          handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/hpp/${id}`);
-        }
-      } else {
-        setProducts(prev => [...prev, newProduct]);
+        setDoc(doc(db, `users/${user.uid}/hpp/${id}`), newProduct)
+          .catch(error => {
+            handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/hpp/${id}`);
+            toast.error('Gagal sinkronisasi produk baru ke cloud.');
+          });
       }
-      toast.success('Produk ditambahkan');
     }
-    setIsProductModalOpen(false);
-    setEditingProduct(null);
   };
 
   const handleDeleteProduct = async (productId: string) => {
@@ -133,16 +151,15 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       return;
     }
     
-    if (user) {
-      try {
+    try {
+      if (user) {
         await deleteDoc(doc(db, `users/${user.uid}/hpp/${productId}`));
-      } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/hpp/${productId}`);
       }
-    } else {
       setProducts(prev => prev.filter(p => p.id !== productId));
+      toast.success('Produk dihapus');
+    } catch (error) {
+      if (user) handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/hpp/${productId}`);
     }
-    toast.success('Produk dihapus');
   };
 
   const handleDuplicateProduct = async (product: Product) => {
@@ -157,31 +174,37 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       }))
     };
     
-    if (user) {
-      try {
+    try {
+      if (user) {
         await setDoc(doc(db, `users/${user.uid}/hpp/${id}`), newProduct);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/hpp/${id}`);
       }
-    } else {
       setProducts(prev => [...prev, newProduct]);
+      toast.success(`Produk '${product.nama}' diduplikasi`);
+    } catch (error) {
+      if (user) handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/hpp/${id}`);
     }
-    toast.success(`Produk '${product.nama}' diduplikasi`);
   };
 
   // Variant CRUD
   const handleSaveVariant = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSaving(true);
     const formData = new FormData(e.target as HTMLFormElement);
     const nama = formData.get('nama') as string;
     const harga_jual = parseInt(formData.get('harga_jual') as string) || 0;
     const qty_batch = parseInt(formData.get('qty_batch') as string) || 145;
     const harga_packing = parseInt(formData.get('harga_packing') as string) || 12000;
 
-    if (!selectedProductId) return;
+    if (!selectedProductId) {
+      setIsSaving(false);
+      return;
+    }
 
     const product = products.find(p => p.id === selectedProductId);
-    if (!product) return;
+    if (!product) {
+      setIsSaving(false);
+      return;
+    }
 
     let updatedVarian;
     if (editingVariant) {
@@ -200,19 +223,21 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
     const updatedProduct = { ...product, varian: updatedVarian };
 
-    if (user) {
-      try {
-        await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), updatedProduct);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
-      }
-    } else {
-      setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
-    }
-
-    toast.success(editingVariant ? 'Varian diperbarui' : 'Varian ditambahkan');
+    // Optimistic update
+    setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
+    toast.success(editingVariant ? 'Varian diperbarui ✓' : 'Varian ditambahkan ✓');
     setIsVariantModalOpen(false);
     setEditingVariant(null);
+
+    try {
+      if (user) {
+        await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), updatedProduct);
+      }
+    } catch (error) {
+      if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDeleteVariant = async (variantId: string) => {
@@ -222,16 +247,15 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
     const updatedProduct = { ...product, varian: product.varian.filter(v => v.id !== variantId) };
 
-    if (user) {
-      try {
+    try {
+      if (user) {
         await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), updatedProduct);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
       }
-    } else {
       setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
+      toast.success('Varian dihapus');
+    } catch (error) {
+      if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
     }
-    toast.success('Varian dihapus');
   };
 
   const handleDuplicateVariant = async (variant: Variant) => {
@@ -283,29 +307,105 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   const handleRemoveMaterial = (index: number) => {
     if (!activeHppVariant) return;
     const material = activeHppVariant.bahan[index];
+    setMaterialToDelete({ index, material });
+    setIsDeleteMaterialConfirmOpen(true);
+  };
+
+  const confirmRemoveMaterial = async () => {
+    if (!materialToDelete || !activeHppVariant || !selectedProductId) return;
+    const { index, material } = materialToDelete;
     
     const newBahan = activeHppVariant.bahan.filter((_, i) => i !== index);
-    setActiveHppVariant({ ...activeHppVariant, bahan: newBahan });
-    toast.success(`Bahan "${material.nama}" berhasil dihapus`);
+    const updatedVariant = { ...activeHppVariant, bahan: newBahan };
+    setActiveHppVariant(updatedVariant);
+    
+    // Save HPP immediately to fulfill "hapus sekaligus"
+    const product = products.find(p => p.id === selectedProductId);
+    if (product) {
+      const updatedProduct = {
+        ...product,
+        varian: product.varian.map(v => v.id === activeHppVariant.id ? updatedVariant : v)
+      };
+      
+      try {
+        if (user) {
+          await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), updatedProduct);
+        }
+        setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
+      } catch (error) {
+        if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
+      }
+    }
+    
+    if (material.nama) {
+      await onDeleteFromStock(material.nama);
+    }
+    
+    toast.success(`Bahan "${material.nama}" berhasil dihapus dari HPP dan Stok`);
+    setIsDeleteMaterialConfirmOpen(false);
+    setMaterialToDelete(null);
   };
 
   const handleRemoveCategory = (catName: string) => {
     if (!activeHppVariant) return;
+    setCategoryToDelete(catName);
+    setIsDeleteCategoryConfirmOpen(true);
+  };
+
+  const confirmRemoveCategory = async () => {
+    if (!categoryToDelete || !activeHppVariant || !selectedProductId) return;
     
+    const catName = categoryToDelete;
+    const materialsToDelete = activeHppVariant.bahan.filter(m => {
+      let mCat = m.kelompok;
+      if (mCat === 'Kulit') mCat = 'Kulit Cireng';
+      if (mCat === 'Isian') mCat = 'Bahan Isian';
+      return mCat === catName;
+    });
+
     const newBahan = activeHppVariant.bahan.filter(m => {
       let mCat = m.kelompok;
       if (mCat === 'Kulit') mCat = 'Kulit Cireng';
       if (mCat === 'Isian') mCat = 'Bahan Isian';
       return mCat !== catName;
     });
-    setActiveHppVariant({ ...activeHppVariant, bahan: newBahan });
-    toast.success(`Kelompok ${catName} berhasil dihapus`);
+
+    const updatedVariant = { ...activeHppVariant, bahan: newBahan };
+    setActiveHppVariant(updatedVariant);
+
+    // Save HPP immediately
+    const product = products.find(p => p.id === selectedProductId);
+    if (product) {
+      const updatedProduct = {
+        ...product,
+        varian: product.varian.map(v => v.id === activeHppVariant.id ? updatedVariant : v)
+      };
+      
+      try {
+        if (user) {
+          await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), updatedProduct);
+        }
+        setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
+      } catch (error) {
+        if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
+      }
+    }
+
+    // Delete from stock
+    for (const m of materialsToDelete) {
+      if (m.nama) await onDeleteFromStock(m.nama);
+    }
+    
+    toast.success(`Kelompok ${catName} dan semua bahannya berhasil dihapus dari HPP dan Stok`);
+    setIsDeleteCategoryConfirmOpen(false);
+    setCategoryToDelete(null);
   };
 
   const handleSaveMaterial = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingMaterial || !activeHppVariant) return;
     
+    setIsSaving(true);
     const formData = new FormData(e.target as HTMLFormElement);
     const nama = formData.get('nama') as string;
     const kelompok = formData.get('kelompok') as string;
@@ -326,29 +426,38 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     setActiveHppVariant({ ...activeHppVariant, bahan: newBahan });
     setIsMaterialModalOpen(false);
     setEditingMaterial(null);
-    toast.success('Bahan diperbarui');
+    setIsSaving(false);
+    toast.success('Bahan diperbarui ✓');
   };
   const handleSaveHpp = async () => {
     if (!activeHppVariant || !selectedProductId) return;
     
+    setIsSaving(true);
     const product = products.find(p => p.id === selectedProductId);
-    if (!product) return;
+    if (!product) {
+      setIsSaving(false);
+      return;
+    }
 
     const updatedProduct = {
       ...product,
       varian: product.varian.map(v => v.id === activeHppVariant.id ? activeHppVariant : v)
     };
 
-    if (user) {
-      try {
+    // Optimistic update
+    setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
+    toast.success('Data HPP berhasil disimpan ✓');
+    setView('variants');
+
+    try {
+      if (user) {
         await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), updatedProduct);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
       }
-    } else {
-      setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
+    } catch (error) {
+      if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
+    } finally {
+      setIsSaving(false);
     }
-    toast.success('Data HPP berhasil disimpan dan disinkronkan ke Stok');
   };
 
   const calculateHpp = (bahan: HppMaterial[], packingCost: number = 0) => {
@@ -357,18 +466,18 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
   // Render Helpers
   const renderBreadcrumbs = () => (
-    <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 mb-4 uppercase tracking-widest">
-      <button onClick={() => setView('products')} className="hover:text-[#FF6B35] transition-colors">HPP</button>
+    <div className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-gray-400 mb-4 uppercase tracking-widest overflow-x-auto no-scrollbar whitespace-nowrap py-1">
+      <button onClick={() => setView('products')} className="hover:text-[#FF6B35] transition-colors shrink-0">HPP</button>
       {view !== 'products' && (
         <>
-          <ChevronRight className="w-3 h-3" />
-          <button onClick={() => setView('variants')} className="hover:text-[#FF6B35] transition-colors">{selectedProduct?.nama}</button>
+          <ChevronRight className="w-3 h-3 shrink-0" />
+          <button onClick={() => setView('variants')} className="hover:text-[#FF6B35] transition-colors shrink-0 max-w-[100px] truncate">{selectedProduct?.nama}</button>
         </>
       )}
       {view === 'detail' && (
         <>
-          <ChevronRight className="w-3 h-3" />
-          <span className="text-[#1A1A2E]">{activeHppVariant?.nama}</span>
+          <ChevronRight className="w-3 h-3 shrink-0" />
+          <span className="text-[#1A1A2E] shrink-0 max-w-[100px] truncate">{activeHppVariant?.nama}</span>
         </>
       )}
     </div>
@@ -466,40 +575,42 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               
               return (
                 <Card key={v.id} className="border-none shadow-sm rounded-3xl bg-white overflow-hidden group hover:shadow-md transition-all duration-300">
-                  <CardContent className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <CardContent className="p-4 md:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-2xl bg-orange-50 flex items-center justify-center text-[#FF6B35]">
+                      <div className="w-12 h-12 rounded-2xl bg-orange-50 flex items-center justify-center text-[#FF6B35] shrink-0">
                         <Calculator className="w-6 h-6" />
                       </div>
-                      <div>
-                        <h3 className="text-lg font-black text-[#1A1A2E]">{v.nama}</h3>
-                        <div className="flex gap-3 mt-1">
-                          <span className="text-xs font-bold text-gray-400">HPP: <span className="text-orange-500">{v.bahan.length > 0 ? `Rp ${Math.round(hppPcs).toLocaleString()}` : '—'}</span></span>
-                          <span className="text-xs font-bold text-gray-400">Jual: <span className="text-green-600">Rp {v.harga_jual.toLocaleString()}</span></span>
+                      <div className="min-w-0">
+                        <h3 className="text-lg font-black text-[#1A1A2E] truncate">{v.nama}</h3>
+                        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
+                          <span className="text-[10px] md:text-xs font-bold text-gray-400">HPP: <span className="text-orange-500">{v.bahan.length > 0 ? `Rp ${Math.round(hppPcs).toLocaleString()}` : '—'}</span></span>
+                          <span className="text-[10px] md:text-xs font-bold text-gray-400">Jual: <span className="text-green-600">Rp {v.harga_jual.toLocaleString()}</span></span>
                           {v.bahan.length > 0 && (
-                            <Badge className="bg-green-100 text-green-700 text-[10px] border-none font-bold">
-                              Margin {margin.toFixed(1)}%
+                            <Badge className="bg-green-100 text-green-700 text-[9px] md:text-[10px] border-none font-black px-2 py-0">
+                              {margin.toFixed(1)}%
                             </Badge>
                           )}
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 justify-end sm:justify-start">
                       <Button 
-                        className="bg-[#FF6B35] hover:bg-[#E55A25] text-white font-bold rounded-xl gap-2"
+                        className="bg-[#FF6B35] hover:bg-[#E55A25] text-white font-bold rounded-xl gap-2 flex-1 sm:flex-none"
                         onClick={() => handleViewDetail(v.id)}
                       >
                         Hitung HPP
                       </Button>
-                      <Button variant="outline" size="icon" className="rounded-xl border-gray-100 text-gray-400 hover:text-blue-500 hover:bg-blue-50" onClick={() => handleDuplicateVariant(v)} title="Duplikasi">
-                        <Copy className="w-4 h-4" />
-                      </Button>
-                      <Button variant="outline" size="icon" className="rounded-xl border-gray-100 text-gray-400 hover:text-blue-500 hover:bg-blue-50" onClick={() => { setEditingVariant(v); setIsVariantModalOpen(true); }}>
-                        <Edit2 className="w-4 h-4" />
-                      </Button>
-                      <Button variant="outline" size="icon" className="rounded-xl border-gray-100 text-gray-400 hover:text-red-500 hover:bg-red-50" onClick={() => handleDeleteVariant(v.id)}>
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-100 text-gray-400 hover:text-blue-500 hover:bg-blue-50" onClick={() => handleDuplicateVariant(v)} title="Duplikasi">
+                          <Copy className="w-4 h-4" />
+                        </Button>
+                        <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-100 text-gray-400 hover:text-blue-500 hover:bg-blue-50" onClick={() => { setEditingVariant(v); setIsVariantModalOpen(true); }}>
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+                        <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-gray-100 text-gray-400 hover:text-red-500 hover:bg-red-50" onClick={() => handleDeleteVariant(v.id)}>
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -566,7 +677,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                                       {m.kelompok}
                                     </Badge>
                                     <span className="text-[10px] font-bold text-gray-400">
-                                      {m.qty} {m.satuan}
+                                      {formatSmartUnit(m.qty, m.satuan)}
                                     </span>
                                   </div>
                                 </div>
@@ -662,10 +773,11 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                   </div>
                   <Button 
                     onClick={handleSaveHpp}
+                    disabled={isSaving}
                     className="w-full mt-4 orange-gradient text-white font-bold h-12 rounded-2xl shadow-lg shadow-orange-200 gap-2"
                   >
                     <Save className="w-4 h-4" />
-                    Simpan Data HPP
+                    {isSaving ? 'Menyimpan...' : 'Simpan Data HPP'}
                   </Button>
                 </CardContent>
               </Card>
@@ -704,7 +816,9 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             </div>
             <DialogFooter className="pt-4">
               <Button type="button" variant="ghost" onClick={() => setIsProductModalOpen(false)} className="rounded-xl font-bold">Batal</Button>
-              <Button type="submit" className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl font-bold">Simpan Produk</Button>
+              <Button type="submit" disabled={isSaving} className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl font-bold">
+                {isSaving ? 'Menyimpan...' : 'Simpan Produk'}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -737,7 +851,9 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             </div>
             <DialogFooter className="pt-4">
               <Button type="button" variant="ghost" onClick={() => setIsVariantModalOpen(false)} className="rounded-xl font-bold">Batal</Button>
-              <Button type="submit" className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl font-bold">Simpan Varian</Button>
+              <Button type="submit" disabled={isSaving} className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl font-bold">
+                {isSaving ? 'Menyimpan...' : 'Simpan Varian'}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -758,13 +874,15 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               <select 
                 id="mat-kelompok" 
                 name="kelompok" 
-                defaultValue={editingMaterial?.material.kelompok || 'Lainnya'}
+                defaultValue={editingMaterial?.material.kelompok || (settings?.kategori_hpp[0] || 'Lainnya')}
                 className="w-full h-10 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B35] font-medium"
               >
-                <option value="Kulit Cireng">Kulit Cireng</option>
-                <option value="Bahan Isian">Bahan Isian</option>
-                <option value="Packing">Packing</option>
-                <option value="Overhead">Overhead</option>
+                {settings?.kategori_hpp.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+                {!settings?.kategori_hpp.includes(editingMaterial?.material.kelompok || '') && editingMaterial?.material.kelompok && (
+                  <option value={editingMaterial.material.kelompok}>{editingMaterial.material.kelompok}</option>
+                )}
                 <option value="Lainnya">Lainnya</option>
               </select>
             </div>
@@ -784,9 +902,47 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             </div>
             <DialogFooter className="pt-4 flex gap-2">
               <Button type="button" variant="ghost" onClick={() => setIsMaterialModalOpen(false)} className="rounded-xl font-bold flex-1">Batal</Button>
-              <Button type="submit" className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl font-bold flex-1">Simpan</Button>
+              <Button type="submit" disabled={isSaving} className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl font-bold flex-1">
+                {isSaving ? 'Menyimpan...' : 'Simpan'}
+              </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isDeleteMaterialConfirmOpen} onOpenChange={setIsDeleteMaterialConfirmOpen}>
+        <DialogContent className="rounded-3xl border-none">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black">Konfirmasi Hapus</DialogTitle>
+            <DialogDescription className="font-medium">
+              Bahan ini juga akan dihapus dari Stok. Lanjutkan?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 pt-4">
+            <Button variant="outline" onClick={() => setIsDeleteMaterialConfirmOpen(false)} className="rounded-2xl font-bold h-12 flex-1">
+              Batal
+            </Button>
+            <Button onClick={confirmRemoveMaterial} className="bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl h-12 flex-1">
+              Hapus
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isDeleteCategoryConfirmOpen} onOpenChange={setIsDeleteCategoryConfirmOpen}>
+        <DialogContent className="rounded-3xl border-none">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black">Konfirmasi Hapus Kelompok</DialogTitle>
+            <DialogDescription className="font-medium">
+              Semua bahan dalam kelompok "{categoryToDelete}" juga akan dihapus dari Stok. Lanjutkan?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 pt-4">
+            <Button variant="outline" onClick={() => setIsDeleteCategoryConfirmOpen(false)} className="rounded-2xl font-bold h-12 flex-1">
+              Batal
+            </Button>
+            <Button onClick={confirmRemoveCategory} className="bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl h-12 flex-1">
+              Hapus
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

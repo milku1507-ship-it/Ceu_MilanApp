@@ -8,6 +8,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recha
 import { Transaction, Product, Variant, HppMaterial } from '../types';
 import { CATEGORIES_LIST } from '../constants/data';
 import { cn } from '@/lib/utils';
+import { formatCompactNumber, formatCurrency } from '../lib/formatUtils';
 
 interface FinancialReportProps {
   transactions: Transaction[];
@@ -138,7 +139,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
             <Badge className="bg-green-50 text-green-700 border-none font-black">Income</Badge>
           </div>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total Pemasukan</p>
-          <h3 className="text-2xl font-black text-[#1A1A2E] mt-1">Rp {totalIncome.toLocaleString()}</h3>
+          <h3 className="text-2xl font-black text-[#1A1A2E] mt-1">{formatCurrency(totalIncome, true)}</h3>
         </Card>
 
         <Card className="border-none shadow-sm rounded-3xl bg-white p-6">
@@ -149,7 +150,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
             <Badge className="bg-red-50 text-red-600 border-none font-black">Expense</Badge>
           </div>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total Pengeluaran</p>
-          <h3 className="text-2xl font-black text-[#1A1A2E] mt-1">Rp {totalExpense.toLocaleString()}</h3>
+          <h3 className="text-2xl font-black text-[#1A1A2E] mt-1">{formatCurrency(totalExpense, true)}</h3>
         </Card>
 
         <Card className={cn(
@@ -163,7 +164,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
             <Badge className="bg-white/20 text-white border-none font-black">Profit</Badge>
           </div>
           <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Laba Bersih ({period})</p>
-          <h3 className="text-2xl font-black mt-1">Rp {netProfit.toLocaleString()}</h3>
+          <h3 className="text-2xl font-black mt-1">{formatCurrency(netProfit, true)}</h3>
           <p className="text-[10px] font-bold mt-2">Margin Keuntungan: {margin.toFixed(1)}%</p>
         </Card>
       </div>

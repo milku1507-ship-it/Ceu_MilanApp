@@ -65,12 +65,27 @@
         "stockSnapshot": { "type": "array" }
       },
       "required": ["id", "tanggal", "jenis", "nominal"]
+    },
+    "KategoriSettings": {
+      "title": "KategoriSettings",
+      "description": "Custom categories for HPP, Products, and Units",
+      "type": "object",
+      "properties": {
+        "kategori_hpp": { "type": "array", "items": { "type": "string" } },
+        "kategori_produk": { "type": "array", "items": { "type": "string" } },
+        "satuan_unit": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["kategori_hpp", "kategori_produk", "satuan_unit"]
     }
   },
   "firestore": {
     "/users/{uid}/profil_toko/settings": {
       "schema": "StoreSettings",
       "description": "User's store settings"
+    },
+    "/users/{uid}/settings/kategori": {
+      "schema": "KategoriSettings",
+      "description": "User's custom categories"
     },
     "/users/{uid}/stok/{ingredientId}": {
       "schema": "Ingredient",

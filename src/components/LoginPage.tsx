@@ -2,19 +2,42 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { auth, googleProvider, signInWithPopup } from '../lib/firebase';
 import { toast } from 'sonner';
-import { LogIn } from 'lucide-react';
+import { Store } from 'lucide-react';
+import { StoreSettings } from '../types';
 
-export default function LoginPage() {
+interface LoginPageProps {
+  settings: StoreSettings;
+}
+
+export default function LoginPage({ settings }: LoginPageProps) {
   const [isLoading, setIsLoading] = React.useState(false);
 
   const handleGoogleLogin = async () => {
+    if (isLoading) return;
     setIsLoading(true);
     try {
       await signInWithPopup(auth, googleProvider);
       toast.success('Berhasil masuk!');
     } catch (error: any) {
+      // Handle user closing the popup gracefully
+      if (error.code === 'auth/popup-closed-by-user') {
+        console.log('User closed the login popup');
+        return;
+      }
+      
       console.error('Login error:', error);
-      toast.error('Gagal masuk dengan Google. Silakan coba lagi.');
+      
+      if (error.code === 'auth/network-request-failed') {
+        toast.error('Koneksi gagal. Silakan periksa internet Anda atau coba lagi.', {
+          description: 'Pastikan tidak ada ad-blocker yang menghalangi login Google.',
+          action: {
+            label: 'Coba Lagi',
+            onClick: handleGoogleLogin
+          }
+        });
+      } else {
+        toast.error('Gagal masuk dengan Google. Silakan coba lagi.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -25,13 +48,24 @@ export default function LoginPage() {
       <div className="w-full max-w-md space-y-8 text-center">
         <div className="space-y-4">
           <div className="flex justify-center">
-            <div className="w-20 h-20 rounded-3xl orange-gradient flex items-center justify-center text-white font-black text-4xl shadow-xl shadow-orange-200">
-              C
+            <div className="w-24 h-24 rounded-[2rem] bg-white shadow-xl shadow-orange-100 flex items-center justify-center overflow-hidden border-4 border-white">
+              {settings.logo ? (
+                <img 
+                  src={settings.logo} 
+                  alt={settings.name} 
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-contain p-2"
+                />
+              ) : (
+                <div className="w-full h-full orange-gradient flex items-center justify-center text-white font-black text-4xl">
+                  {settings.name.charAt(0)}
+                </div>
+              )}
             </div>
           </div>
           <div className="space-y-2">
-            <h1 className="text-4xl font-black text-[#1A1A2E]">Ceumilan Pay</h1>
-            <p className="text-gray-500 font-medium">Manajemen HPP & Stok Cireng Jadi Lebih Mudah</p>
+            <h1 className="text-4xl font-black text-[#1A1A2E]">{settings.name}</h1>
+            <p className="text-gray-500 font-medium">Manajemen HPP & Stok Jadi Lebih Mudah</p>
           </div>
         </div>
 
@@ -63,7 +97,7 @@ export default function LoginPage() {
                     d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
                   />
                 </svg>
-                Masuk dengan Google
+                Masuk ke {settings.name}
               </>
             )}
           </Button>

@@ -6,18 +6,23 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { TrendingUp, TrendingDown, DollarSign, Package, AlertCircle, ArrowUpRight, Clock, Wallet, ArrowUp, ArrowDown, History, MoreHorizontal, LayoutGrid, Calculator } from 'lucide-react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts';
-import { Ingredient, Transaction } from '../types';
+import { Ingredient, Transaction, StoreSettings } from '../types';
 import { User } from 'firebase/auth';
 import { cn } from '@/lib/utils';
+import { formatSmartUnit } from '../lib/unitUtils';
+import { formatCompactNumber, formatCurrency } from '../lib/formatUtils';
 
 interface DashboardProps {
   user: User | null;
   ingredients: Ingredient[];
   transactions: Transaction[];
+  storeSettings: StoreSettings;
   setActiveTab: (tab: string) => void;
+  onSeedData?: () => Promise<void>;
+  onStartFresh?: () => Promise<void>;
 }
 
-export default function Dashboard({ user, ingredients, transactions, setActiveTab }: DashboardProps) {
+export default function Dashboard({ user, ingredients, transactions, storeSettings, setActiveTab, onSeedData, onStartFresh }: DashboardProps) {
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
 
@@ -53,8 +58,34 @@ export default function Dashboard({ user, ingredients, transactions, setActiveTa
     };
   });
 
+  const showWelcome = ingredients.length === 0 && transactions.length === 0 && !storeSettings.onboardingCompleted;
+
   return (
     <div className="space-y-6 pb-8">
+      {showWelcome && (
+        <Card className="border-none shadow-xl rounded-[2.5rem] bg-orange-50 p-8 text-center space-y-4 animate-in fade-in zoom-in duration-500">
+          <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto text-[#FF6B35] shadow-sm">
+            <Package className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-black text-[#1A1A2E]">Selamat Datang di Cloud!</h3>
+            <p className="text-sm text-gray-500 font-medium max-w-xs mx-auto">
+              Akun kamu masih kosong. Mulai masukkan data atau gunakan data contoh untuk mencoba fitur.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Button onClick={onStartFresh || (() => setActiveTab('hpp'))} className="orange-gradient text-white font-bold rounded-2xl px-8 h-12">
+              Mulai Input HPP
+            </Button>
+            {onSeedData && (
+              <Button onClick={onSeedData} variant="outline" className="bg-white border-orange-100 text-[#FF6B35] font-bold rounded-2xl px-8 h-12">
+                Gunakan Data Contoh
+              </Button>
+            )}
+          </div>
+        </Card>
+      )}
+
       {/* E-Wallet Header Card */}
       <div className="relative overflow-hidden wallet-gradient rounded-[2.5rem] p-6 text-white shadow-2xl shadow-blue-200">
         <div className="relative z-10">
@@ -65,7 +96,7 @@ export default function Dashboard({ user, ingredients, transactions, setActiveTa
               </div>
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Saldo Laba (Bulan Ini)</p>
-                <h3 className="text-3xl font-black">Rp {netProfit.toLocaleString()}</h3>
+                <h3 className="text-3xl font-black">{formatCurrency(netProfit, true)}</h3>
               </div>
             </div>
             <div className="flex flex-col items-end">
@@ -98,7 +129,7 @@ export default function Dashboard({ user, ingredients, transactions, setActiveTa
             </div>
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Pemasukan</span>
           </div>
-          <p className="text-xl font-black text-[#1A1A2E]">Rp {totalRevenue.toLocaleString()}</p>
+          <p className="text-xl font-black text-[#1A1A2E]">{formatCurrency(totalRevenue, true)}</p>
           <p className="text-[10px] text-green-600 font-bold mt-1">+{transactions.filter(t => t.jenis === 'Pemasukan').length} Transaksi</p>
         </div>
         <div className="bg-white rounded-[2rem] p-5 shadow-sm border border-gray-50">
@@ -108,7 +139,7 @@ export default function Dashboard({ user, ingredients, transactions, setActiveTa
             </div>
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Pengeluaran</span>
           </div>
-          <p className="text-xl font-black text-[#1A1A2E]">Rp {totalExpense.toLocaleString()}</p>
+          <p className="text-xl font-black text-[#1A1A2E]">{formatCurrency(totalExpense, true)}</p>
           <p className="text-[10px] text-red-500 font-bold mt-1">-{transactions.filter(t => t.jenis === 'Pengeluaran').length} Transaksi</p>
         </div>
       </div>
@@ -182,7 +213,7 @@ export default function Dashboard({ user, ingredients, transactions, setActiveTa
                     "text-sm font-black",
                     t.jenis === 'Pemasukan' ? "text-green-600" : "text-red-500"
                   )}>
-                    {t.jenis === 'Pemasukan' ? '+' : '-'} {t.nominal.toLocaleString()}
+                    {t.jenis === 'Pemasukan' ? '+' : '-'} {formatCompactNumber(t.nominal)}
                   </p>
                   <p className="text-[10px] text-gray-400">{t.tanggal}</p>
                 </div>
@@ -208,7 +239,7 @@ export default function Dashboard({ user, ingredients, transactions, setActiveTa
                   <AlertCircle className="w-4 h-4" />
                 </div>
                 <p className="text-xs font-bold text-[#1A1A2E] truncate">{item.name}</p>
-                <p className="text-[10px] font-bold text-orange-600 mt-1">Sisa: {item.currentStock} {item.unit}</p>
+                <p className="text-[10px] font-bold text-orange-600 mt-1">Sisa: {formatSmartUnit(item.currentStock, item.unit)}</p>
               </div>
             ))}
           </div>

@@ -35,9 +35,18 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       
       try {
         // Try to parse Firestore JSON error
-        const parsed = JSON.parse(this.state.error.message);
-        if (parsed.error && parsed.error.includes('Missing or insufficient permissions')) {
-          errorMessage = "Akses ditolak. Kamu tidak memiliki izin untuk melakukan operasi ini.";
+        const message = this.state.error?.message || String(this.state.error);
+        if (message.startsWith('{')) {
+          const parsed = JSON.parse(message);
+          if (parsed.error) {
+            if (parsed.error.includes('Missing or insufficient permissions')) {
+              errorMessage = "Akses ditolak. Kamu tidak memiliki izin untuk melakukan operasi ini.";
+            } else if (parsed.error.includes('offline')) {
+              errorMessage = "Koneksi terputus. Pastikan internet kamu aktif dan coba lagi.";
+            }
+          }
+        } else if (message.includes('offline')) {
+          errorMessage = "Koneksi terputus. Pastikan internet kamu aktif dan coba lagi.";
         }
       } catch (e) {
         // Not a JSON error or other error
