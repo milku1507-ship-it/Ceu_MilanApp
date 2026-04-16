@@ -19,11 +19,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import { auth, db, doc, setDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError, serverTimestamp, increment } from '../lib/firebase';
+import { auth, db, doc, setDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError, serverTimestamp, increment, sanitizeData } from '../lib/firebase';
 import { User } from 'firebase/auth';
 import { useSettings } from '../SettingsContext';
 import { formatSmartUnit } from '../lib/unitUtils';
-import { formatCompactNumber } from '../lib/formatUtils';
+import { formatCompactNumber, formatCurrency } from '../lib/formatUtils';
 
 interface TransactionManagerProps {
   user: User | null;
@@ -58,6 +58,7 @@ export default function TransactionManager({ user, transactions, setTransactions
   
   const [newTx, setNewTx] = React.useState<Partial<Transaction>>({
     tanggal: new Date().toISOString().split('T')[0],
+    tanggal_akhir: null,
     jenis: 'Pemasukan',
     kategori: 'Penjualan',
     nominal: 0,
@@ -254,7 +255,7 @@ export default function TransactionManager({ user, transactions, setTransactions
       const tx: any = {
         id: txId,
         tanggal: newTx.tanggal || new Date().toISOString().split('T')[0],
-        tanggal_akhir: isRange ? newTx.tanggal_akhir : undefined,
+        tanggal_akhir: isRange ? (newTx.tanggal_akhir ?? null) : null,
         keterangan: newTx.keterangan || '',
         kategori: newTx.kategori || 'Lainnya',
         jenis: newTx.jenis || 'Pengeluaran',
@@ -289,7 +290,7 @@ export default function TransactionManager({ user, transactions, setTransactions
         const batch = writeBatch(db);
         
         // Add transaction
-        batch.set(doc(db, `users/${user.uid}/transaksi/${txId}`), tx);
+        batch.set(doc(db, `users/${user.uid}/transaksi/${txId}`), sanitizeData(tx));
         
         // Update ingredients
         stockUpdates.forEach(update => {
@@ -334,7 +335,7 @@ export default function TransactionManager({ user, transactions, setTransactions
       setIsRange(false);
       setNewTx({
         tanggal: new Date().toISOString().split('T')[0],
-        tanggal_akhir: undefined,
+        tanggal_akhir: null,
         jenis: 'Pemasukan',
         kategori: 'Penjualan',
         nominal: 0,
@@ -552,17 +553,17 @@ export default function TransactionManager({ user, transactions, setTransactions
           </div>
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Total Saldo</p>
-            <h3 className="text-2xl md:text-4xl font-black truncate">Rp {balance.toLocaleString()}</h3>
+            <h3 className="text-2xl md:text-4xl font-black truncate">{formatCurrency(balance, true)}</h3>
           </div>
         </div>
         <div className="flex gap-3 md:gap-4 w-full md:w-auto">
           <div className="flex-1 md:flex-none px-4 md:px-6 py-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/10">
             <p className="text-[9px] font-bold uppercase opacity-70 mb-1">Pemasukan</p>
-            <p className="text-base md:text-xl font-black text-green-300">Rp {totalIncome.toLocaleString()}</p>
+            <p className="text-base md:text-xl font-black text-green-300">{formatCurrency(totalIncome, true)}</p>
           </div>
           <div className="flex-1 md:flex-none px-4 md:px-6 py-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/10">
             <p className="text-[9px] font-bold uppercase opacity-70 mb-1">Pengeluaran</p>
-            <p className="text-base md:text-xl font-black text-red-300">Rp {totalExpense.toLocaleString()}</p>
+            <p className="text-base md:text-xl font-black text-red-300">{formatCurrency(totalExpense, true)}</p>
           </div>
         </div>
       </div>

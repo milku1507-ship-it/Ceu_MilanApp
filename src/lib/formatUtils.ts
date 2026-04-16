@@ -9,14 +9,16 @@
  */
 export function formatCompactNumber(value: number): string {
   if (value >= 1000000) {
-    const formatted = (value / 1000000).toFixed(1).replace(/\.0$/, '');
+    const num = value / 1000000;
+    const formatted = num.toLocaleString('id-ID', { maximumFractionDigits: 1 });
     return `${formatted}jt`;
   }
   if (value >= 1000) {
-    const formatted = (value / 1000).toFixed(1).replace(/\.0$/, '');
+    const num = value / 1000;
+    const formatted = num.toLocaleString('id-ID', { maximumFractionDigits: 1 });
     return `${formatted}rb`;
   }
-  return value.toString();
+  return value.toLocaleString('id-ID');
 }
 
 /**

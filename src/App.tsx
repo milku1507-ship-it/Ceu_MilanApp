@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { Store, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { auth, db, onAuthStateChanged, doc, collection, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, serverTimestamp, User, OperationType, handleFirestoreError } from './lib/firebase';
+import { auth, db, onAuthStateChanged, doc, collection, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch, serverTimestamp, User, OperationType, handleFirestoreError, sanitizeData } from './lib/firebase';
 import LoginPage from './components/LoginPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -72,12 +72,12 @@ function AppContent() {
           const userRef = doc(db, 'users', currentUser.uid);
           const userSnap = await getDoc(userRef);
           if (!userSnap.exists()) {
-            await setDoc(userRef, {
+            await setDoc(userRef, sanitizeData({
               nama: currentUser.displayName,
               email: currentUser.email,
               foto: currentUser.photoURL,
               createdAt: serverTimestamp()
-            });
+            }));
           }
         } catch (error) {
           console.warn('Initial user setup failed (might be offline):', error);
@@ -98,7 +98,10 @@ function AppContent() {
       if (snapshot.exists()) {
         setStoreSettings(snapshot.data() as StoreSettings);
       }
-    }, (error) => handleFirestoreError(error, OperationType.GET, `users/${uid}/profil_toko/settings`));
+    }, (error) => {
+      console.error('Settings sync error:', error);
+      // Don't throw here to avoid unhandled rejections in background listeners
+    });
 
     // Sync Ingredients
     const unsubIngredients = onSnapshot(collection(db, `users/${uid}/stok`), (snapshot) => {
@@ -106,7 +109,7 @@ function AppContent() {
       setIngredients(data);
       setIsCloudSyncing(false);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `users/${uid}/stok`);
+      console.error('Ingredients sync error:', error);
       setIsCloudSyncing(false);
     });
 
@@ -114,7 +117,9 @@ function AppContent() {
     const unsubProducts = onSnapshot(collection(db, `users/${uid}/hpp`), (snapshot) => {
       const data = snapshot.docs.map(doc => doc.data() as Product);
       setProducts(data);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, `users/${uid}/hpp`));
+    }, (error) => {
+      console.error('Products sync error:', error);
+    });
 
     // Sync Transactions
     const unsubTransactions = onSnapshot(collection(db, `users/${uid}/transaksi`), (snapshot) => {
@@ -122,7 +127,9 @@ function AppContent() {
       // Sort by date descending
       const sorted = data.sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
       setTransactions(sorted);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, `users/${uid}/transaksi`));
+    }, (error) => {
+      console.error('Transactions sync error:', error);
+    });
 
     return () => {
       unsubSettings();
@@ -134,24 +141,25 @@ function AppContent() {
 
   // Data Persistence (Local Storage for guest users)
   React.useEffect(() => {
+    // Only load from localStorage if we are a guest AND the state is currently empty (initial load)
     if (isAuthReady && !user) {
       const localIng = localStorage.getItem('cireng_ingredients');
       const localProd = localStorage.getItem('cireng_produk');
       const localTx = localStorage.getItem('cireng_transactions');
       const localSettings = localStorage.getItem('cireng_store_settings');
 
-      if (localIng) setIngredients(JSON.parse(localIng));
-      else setIngredients(INITIAL_INGREDIENTS);
+      if (localIng && ingredients.length === 0) setIngredients(JSON.parse(localIng));
+      else if (!localIng && ingredients.length === 0) setIngredients(INITIAL_INGREDIENTS);
 
-      if (localProd) setProducts(JSON.parse(localProd));
-      else setProducts(INITIAL_PRODUCTS);
+      if (localProd && products.length === 0) setProducts(JSON.parse(localProd));
+      else if (!localProd && products.length === 0) setProducts(INITIAL_PRODUCTS);
 
-      if (localTx) setTransactions(JSON.parse(localTx));
-      else setTransactions(SAMPLE_TRANSACTIONS);
+      if (localTx && transactions.length === 0) setTransactions(JSON.parse(localTx));
+      else if (!localTx && transactions.length === 0) setTransactions(SAMPLE_TRANSACTIONS);
 
       if (localSettings) setStoreSettings(JSON.parse(localSettings));
     }
-  }, [user, isAuthReady]);
+  }, [user, isAuthReady]); // Removed ingredients.length etc from deps to avoid re-triggering
 
   // Save to Local Storage
   React.useEffect(() => {
@@ -159,11 +167,12 @@ function AppContent() {
       // Always save settings for branding persistence
       localStorage.setItem('cireng_store_settings', JSON.stringify(storeSettings));
       
-      // Only save data for guest users
+      // Only save data for guest users OR at the moment of logout
+      // If user is null, it means we are either a guest or just logged out
       if (!user) {
-        localStorage.setItem('cireng_ingredients', JSON.stringify(ingredients));
-        localStorage.setItem('cireng_produk', JSON.stringify(products));
-        localStorage.setItem('cireng_transactions', JSON.stringify(transactions));
+        if (ingredients.length > 0) localStorage.setItem('cireng_ingredients', JSON.stringify(ingredients));
+        if (products.length > 0) localStorage.setItem('cireng_produk', JSON.stringify(products));
+        if (transactions.length > 0) localStorage.setItem('cireng_transactions', JSON.stringify(transactions));
       }
     }
   }, [ingredients, products, transactions, storeSettings, user, isAuthReady]);
@@ -200,7 +209,7 @@ function AppContent() {
   const updateStoreSettings = async (newSettings: StoreSettings) => {
     if (!user) return;
     try {
-      await setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), newSettings);
+      await setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), sanitizeData(newSettings));
       setStoreSettings(newSettings);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/profil_toko/settings`);
@@ -208,13 +217,18 @@ function AppContent() {
   };
 
   const updateIngredients = async (newIngredients: Ingredient[]) => {
-    if (!user) {
-      setIngredients(newIngredients);
-      return;
+    setIngredients(newIngredients);
+    if (!user) return;
+    
+    const batch = writeBatch(db);
+    try {
+      newIngredients.forEach(ing => {
+        batch.set(doc(db, `users/${user.uid}/stok/${ing.id}`), JSON.parse(JSON.stringify(ing)));
+      });
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/stok`);
     }
-    // For simplicity in this turn, we'll let the onSnapshot handle the state update
-    // but we need to write the changes to Firestore. 
-    // Usually you'd use a more granular update, but here we'll batch or set individual docs.
   };
 
   // Migration Logic
@@ -233,7 +247,7 @@ function AppContent() {
 
       // Add to batch
       if (Object.keys(localSettings).length > 0) {
-        batch.set(doc(db, `users/${uid}/profil_toko/settings`), localSettings);
+        batch.set(doc(db, `users/${uid}/profil_toko/settings`), sanitizeData(localSettings));
       }
 
       localIngredients.forEach((ing: Ingredient) => {
@@ -286,7 +300,7 @@ function AppContent() {
         onboardingCompleted: true,
         name: storeSettings.name || 'Ceumilan Pay'
       };
-      batch.set(doc(db, `users/${uid}/profil_toko/settings`), newSettings);
+      batch.set(doc(db, `users/${uid}/profil_toko/settings`), sanitizeData(newSettings));
       
       await batch.commit();
       setStoreSettings(newSettings);
@@ -348,20 +362,20 @@ function AppContent() {
         if (existingIng) {
           if (existingIng.category !== m.kelompok || existingIng.price !== m.harga || existingIng.unit !== m.satuan || existingIng.name !== m.nama) {
             batch.update(stockRef, {
-              name: m.nama,
-              category: m.kelompok,
-              price: m.harga,
-              unit: m.satuan
+              name: m.nama || '',
+              category: m.kelompok || 'Lainnya',
+              price: Number(m.harga) || 0,
+              unit: m.satuan || 'gram'
             });
             hasChanges = true;
           }
         } else {
           batch.set(stockRef, {
             id: stockId,
-            name: m.nama,
-            category: m.kelompok,
-            unit: m.satuan,
-            price: m.harga,
+            name: m.nama || '',
+            category: m.kelompok || 'Lainnya',
+            unit: m.satuan || 'gram',
+            price: Number(m.harga) || 0,
             initialStock: 0,
             currentStock: 0,
             minStock: 0,
@@ -451,10 +465,10 @@ function AppContent() {
         transactions.forEach(t => batch.delete(doc(db, `users/${user.uid}/transaksi/${t.id}`)));
         
         // Keep settings but mark as onboarding completed to prevent re-seeding
-        batch.set(doc(db, `users/${user.uid}/profil_toko/settings`), {
+        batch.set(doc(db, `users/${user.uid}/profil_toko/settings`), sanitizeData({
           ...storeSettings,
           onboardingCompleted: true
-        });
+        }));
 
         await batch.commit();
         toast.success('Semua data cloud berhasil dikosongkan.');

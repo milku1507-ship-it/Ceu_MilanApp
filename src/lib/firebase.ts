@@ -63,11 +63,10 @@ try {
 
 export const auth = authInstance;
 
-// Use initializeFirestore with long polling and disabled fetch streams for maximum compatibility
+// Use initializeFirestore with long polling for maximum compatibility in iframes/mobile
 let dbInstance;
 const dbSettings = {
   experimentalForceLongPolling: true,
-  useFetchStreams: false,
 };
 
 try {
@@ -75,33 +74,14 @@ try {
   const dbId = firestoreDatabaseId && firestoreDatabaseId !== '(default)' ? firestoreDatabaseId : undefined;
   dbInstance = initializeFirestore(app, dbSettings, dbId);
 } catch (e) {
-  console.error('Failed to initialize Firestore with named database, falling back to default:', e);
+  console.error('Failed to initialize Firestore, falling back to default:', e);
   dbInstance = initializeFirestore(app, dbSettings);
 }
 
 export const db = dbInstance;
 
-// Force network connection with retry and status check
-const enableFirestoreNetwork = async (retries = 5) => {
-  if (!window.navigator.onLine) {
-    console.warn('Device is offline, Firestore will operate in offline mode');
-    return;
-  }
-
-  for (let i = 0; i < retries; i++) {
-    try {
-      await enableNetwork(db);
-      console.log('Firestore network enabled successfully');
-      return;
-    } catch (err) {
-      console.warn(`Attempt ${i + 1} to enable network failed:`, err);
-      // Exponential backoff
-      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
-    }
-  }
-};
-
-enableFirestoreNetwork();
+// Force network connection
+enableNetwork(db).catch(err => console.warn('Initial enableNetwork failed:', err));
 
 export const googleProvider = new GoogleAuthProvider();
 
@@ -152,11 +132,11 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     path: path,
     databaseId: firestoreDatabaseId,
     projectId: firebaseConfig.projectId,
-    isOffline
+    isOffline,
+    fullError: error
   });
 
   // For background sync operations (onSnapshot), we can just warn if offline
-  // The SDK will automatically reconnect and retry when back online
   if (isOffline && (operationType === OperationType.GET || operationType === OperationType.LIST)) {
     console.warn(`[Firestore] ${operationType} operation on ${path} is pending due to offline state.`);
     return;
@@ -164,6 +144,16 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
   throw new Error(JSON.stringify(errInfo));
 }
+
+/**
+ * Sanitizes data for Firestore by removing undefined values
+ */
+export function sanitizeData(data: any): any {
+  return JSON.parse(JSON.stringify(data));
+}
+
+// Removed testFirestoreConnection to avoid false positive error messages in the UI
+// The SDK's own error handling and our handleFirestoreError will manage real issues.
 
 export { signInWithPopup, signOut, onAuthStateChanged, doc, collection, setDoc, getDoc, getDocs, onSnapshot, query, where, deleteDoc, writeBatch, serverTimestamp, arrayUnion, arrayRemove, updateDoc, addDoc, increment };
 export type { User };

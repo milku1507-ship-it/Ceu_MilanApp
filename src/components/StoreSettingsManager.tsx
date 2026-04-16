@@ -8,7 +8,7 @@ import { StoreSettings } from '../types';
 import { toast } from 'sonner';
 import { Store, Upload, X, Save, ArrowLeft, Settings2 } from 'lucide-react';
 
-import { auth, db, doc, setDoc, OperationType, handleFirestoreError } from '../lib/firebase';
+import { auth, db, doc, setDoc, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
 
 interface StoreSettingsManagerProps {
   settings: StoreSettings;
@@ -42,7 +42,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
     
     if (user) {
       // Background sync
-      setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), localSettings)
+      setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), sanitizeData(localSettings))
         .then(() => {
           console.log('Settings synced successfully');
         })

@@ -35,7 +35,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
           setIsLoading(false);
         }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `users/${user.uid}/settings/kategori`);
+          console.error('Settings sync error:', error);
           setIsLoading(false);
         });
         return () => unsubSnapshot();

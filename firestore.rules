@@ -1,8 +1,32 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{uid}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+    
+    function isValidString(val, min, max) {
+      return val is string && val.size() >= min && val.size() <= max;
+    }
+    
+    function isValidNumber(val, min) {
+      return val is number && val >= min;
+    }
+
+    match /users/{uid} {
+      // Allow user to manage their own data
+      match /{allPaths=**} {
+        allow read, write: if isOwner(uid);
+      }
+      
+      // Specific validations could be added here for each subcollection if needed
+      // For now, we enforce ownership at the top level of the user's tree
     }
   }
 }

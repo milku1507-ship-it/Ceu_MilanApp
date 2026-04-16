@@ -51,7 +51,7 @@ export type PenjualanDetail = {
 export type Transaction = {
   id: string;
   tanggal: string;
-  tanggal_akhir?: string;
+  tanggal_akhir?: string | null;
   keterangan: string;
   kategori: string;
   jenis: 'Pemasukan' | 'Pengeluaran';

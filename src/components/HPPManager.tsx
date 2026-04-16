@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -21,9 +22,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import { auth, db, doc, setDoc, deleteDoc, OperationType, handleFirestoreError } from '../lib/firebase';
+import { auth, db, doc, setDoc, deleteDoc, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
 import { useSettings } from '../SettingsContext';
 import { formatSmartUnit } from '../lib/unitUtils';
+import { formatCurrency } from '../lib/formatUtils';
 
 interface HPPManagerProps {
   user: User | null;
@@ -99,24 +101,28 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     setIsSaving(true);
     const formData = new FormData(e.target as HTMLFormElement);
     const nama = formData.get('nama') as string;
-    const deskripsi = formData.get('deskripsi') as string;
+    const deskripsi = (formData.get('deskripsi') as string) || '';
 
     if (editingProduct) {
       const updatedProduct = { ...editingProduct, nama, deskripsi };
       
       // Optimistic update
       setProducts(prev => prev.map(p => p.id === editingProduct.id ? updatedProduct : p));
-      toast.success('Produk diperbarui ✓');
+      
+      // Close modal immediately for responsiveness
       setIsProductModalOpen(false);
       setEditingProduct(null);
-      setIsSaving(false);
 
-      if (user) {
-        setDoc(doc(db, `users/${user.uid}/hpp/${editingProduct.id}`), updatedProduct)
-          .catch(error => {
-            handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${editingProduct.id}`);
-            toast.error('Gagal sinkronisasi produk ke cloud.');
-          });
+      try {
+        if (user) {
+          await setDoc(doc(db, `users/${user.uid}/hpp/${editingProduct.id}`), sanitizeData(updatedProduct));
+        }
+        toast.success('Produk diperbarui ✓');
+      } catch (error) {
+        if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${editingProduct.id}`);
+        toast.error('Gagal menyimpan produk');
+      } finally {
+        setIsSaving(false);
       }
     } else {
       const id = 'prod_' + Math.random().toString(36).substr(2, 9);
@@ -129,17 +135,21 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       
       // Optimistic update
       setProducts(prev => [...prev, newProduct]);
-      toast.success('Produk ditambahkan ✓');
+      
+      // Close modal immediately for responsiveness
       setIsProductModalOpen(false);
       setEditingProduct(null);
-      setIsSaving(false);
 
-      if (user) {
-        setDoc(doc(db, `users/${user.uid}/hpp/${id}`), newProduct)
-          .catch(error => {
-            handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/hpp/${id}`);
-            toast.error('Gagal sinkronisasi produk baru ke cloud.');
-          });
+      try {
+        if (user) {
+          await setDoc(doc(db, `users/${user.uid}/hpp/${id}`), sanitizeData(newProduct));
+        }
+        toast.success('Produk ditambahkan ✓');
+      } catch (error) {
+        if (user) handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/hpp/${id}`);
+        toast.error('Gagal menyimpan produk');
+      } finally {
+        setIsSaving(false);
       }
     }
   };
@@ -225,16 +235,19 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
     // Optimistic update
     setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
-    toast.success(editingVariant ? 'Varian diperbarui ✓' : 'Varian ditambahkan ✓');
+    
+    // Close modal immediately for responsiveness
     setIsVariantModalOpen(false);
     setEditingVariant(null);
 
     try {
       if (user) {
-        await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), updatedProduct);
+        await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
       }
+      toast.success(editingVariant ? 'Varian diperbarui ✓' : 'Varian ditambahkan ✓');
     } catch (error) {
       if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
+      toast.error('Gagal menyimpan varian');
     } finally {
       setIsSaving(false);
     }
@@ -451,7 +464,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
     try {
       if (user) {
-        await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), updatedProduct);
+        await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
       }
     } catch (error) {
       if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
@@ -583,8 +596,8 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                       <div className="min-w-0">
                         <h3 className="text-lg font-black text-[#1A1A2E] truncate">{v.nama}</h3>
                         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
-                          <span className="text-[10px] md:text-xs font-bold text-gray-400">HPP: <span className="text-orange-500">{v.bahan.length > 0 ? `Rp ${Math.round(hppPcs).toLocaleString()}` : '—'}</span></span>
-                          <span className="text-[10px] md:text-xs font-bold text-gray-400">Jual: <span className="text-green-600">Rp {v.harga_jual.toLocaleString()}</span></span>
+                          <span className="text-[10px] md:text-xs font-bold text-gray-400">HPP: <span className="text-orange-500">{v.bahan.length > 0 ? formatCurrency(Math.round(hppPcs), true) : '—'}</span></span>
+                          <span className="text-[10px] md:text-xs font-bold text-gray-400">Jual: <span className="text-green-600">{formatCurrency(v.harga_jual, true)}</span></span>
                           {v.bahan.length > 0 && (
                             <Badge className="bg-green-100 text-green-700 text-[9px] md:text-[10px] border-none font-black px-2 py-0">
                               {margin.toFixed(1)}%
@@ -683,7 +696,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                                 </div>
                                 <div className="text-right shrink-0">
                                   <p className="text-sm font-black text-[#FF6B35]">
-                                    Rp {(m.qty * m.harga).toLocaleString()}
+                                    {formatCurrency(m.qty * m.harga, true)}
                                   </p>
                                   <div className="flex gap-1 mt-2 justify-end">
                                     <Button 
@@ -731,7 +744,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               <Card className="border-none shadow-sm rounded-3xl bg-white overflow-hidden">
                 <div className="bg-[#FF6B35] p-6 text-white">
                   <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Total HPP per Batch</p>
-                  <h3 className="text-3xl font-black mt-1">Rp {calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing).toLocaleString()}</h3>
+                  <h3 className="text-3xl font-black mt-1">{formatCurrency(calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing), true)}</h3>
                   <div className="mt-4 flex items-center gap-2">
                     <Badge className="bg-white/20 text-white border-none font-bold">
                       {activeHppVariant.qty_batch} pcs / batch
@@ -742,7 +755,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-bold text-gray-500">HPP per Pcs</span>
                     <span className="text-lg font-black text-[#1A1A2E]">
-                      Rp {Math.round(calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing) / activeHppVariant.qty_batch).toLocaleString()}
+                      {formatCurrency(Math.round(calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing) / activeHppVariant.qty_batch), true)}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
@@ -761,7 +774,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-sm font-bold text-gray-500">Laba per Pcs</span>
                       <span className="text-lg font-black text-green-600">
-                        Rp {Math.round(activeHppVariant.harga_jual - (calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing) / activeHppVariant.qty_batch)).toLocaleString()}
+                        {formatCurrency(Math.round(activeHppVariant.harga_jual - (calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing) / activeHppVariant.qty_batch)), true)}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
@@ -799,8 +812,11 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       )}
 
       {/* MODALS */}
-      <Dialog open={isProductModalOpen} onOpenChange={setIsProductModalOpen}>
-        <DialogContent key={editingProduct?.id || 'new-product'} className="rounded-3xl border-none">
+      <Dialog open={isProductModalOpen} onOpenChange={(open) => {
+        setIsProductModalOpen(open);
+        if (!open) setEditingProduct(null);
+      }}>
+        <DialogContent className="rounded-3xl border-none">
           <DialogHeader>
             <DialogTitle className="text-xl font-black">{editingProduct ? 'Edit Produk' : 'Tambah Produk Baru'}</DialogTitle>
             <DialogDescription>Masukkan informasi produk utama di sini.</DialogDescription>
@@ -815,7 +831,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               <Input id="deskripsi" name="deskripsi" defaultValue={editingProduct?.deskripsi || ''} placeholder="Contoh: Cireng goreng dengan berbagai isian" className="rounded-xl" />
             </div>
             <DialogFooter className="pt-4">
-              <Button type="button" variant="ghost" onClick={() => setIsProductModalOpen(false)} className="rounded-xl font-bold">Batal</Button>
+              <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold">Batal</Button>} />
               <Button type="submit" disabled={isSaving} className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl font-bold">
                 {isSaving ? 'Menyimpan...' : 'Simpan Produk'}
               </Button>
@@ -824,8 +840,11 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isVariantModalOpen} onOpenChange={setIsVariantModalOpen}>
-        <DialogContent key={editingVariant?.id || 'new-variant'} className="rounded-3xl border-none">
+      <Dialog open={isVariantModalOpen} onOpenChange={(open) => {
+        setIsVariantModalOpen(open);
+        if (!open) setEditingVariant(null);
+      }}>
+        <DialogContent className="rounded-3xl border-none">
           <DialogHeader>
             <DialogTitle className="text-xl font-black">{editingVariant ? 'Edit Varian' : 'Tambah Varian Baru'}</DialogTitle>
             <DialogDescription>Masukkan detail varian untuk produk {selectedProduct?.nama}.</DialogDescription>
@@ -850,7 +869,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               <Input id="harga_packing" name="harga_packing" type="number" defaultValue={editingVariant?.harga_packing || 12000} required className="rounded-xl" />
             </div>
             <DialogFooter className="pt-4">
-              <Button type="button" variant="ghost" onClick={() => setIsVariantModalOpen(false)} className="rounded-xl font-bold">Batal</Button>
+              <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold">Batal</Button>} />
               <Button type="submit" disabled={isSaving} className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl font-bold">
                 {isSaving ? 'Menyimpan...' : 'Simpan Varian'}
               </Button>
@@ -901,7 +920,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               <Input id="mat-harga" name="harga" type="number" step="0.01" defaultValue={editingMaterial?.material.harga || 0} required className="rounded-xl" />
             </div>
             <DialogFooter className="pt-4 flex gap-2">
-              <Button type="button" variant="ghost" onClick={() => setIsMaterialModalOpen(false)} className="rounded-xl font-bold flex-1">Batal</Button>
+              <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold flex-1">Batal</Button>} />
               <Button type="submit" disabled={isSaving} className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl font-bold flex-1">
                 {isSaving ? 'Menyimpan...' : 'Simpan'}
               </Button>
@@ -918,9 +937,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex gap-2 pt-4">
-            <Button variant="outline" onClick={() => setIsDeleteMaterialConfirmOpen(false)} className="rounded-2xl font-bold h-12 flex-1">
-              Batal
-            </Button>
+            <DialogClose render={<Button variant="outline" className="rounded-2xl font-bold h-12 flex-1">Batal</Button>} />
             <Button onClick={confirmRemoveMaterial} className="bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl h-12 flex-1">
               Hapus
             </Button>
@@ -936,9 +953,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex gap-2 pt-4">
-            <Button variant="outline" onClick={() => setIsDeleteCategoryConfirmOpen(false)} className="rounded-2xl font-bold h-12 flex-1">
-              Batal
-            </Button>
+            <DialogClose render={<Button variant="outline" className="rounded-2xl font-bold h-12 flex-1">Batal</Button>} />
             <Button onClick={confirmRemoveCategory} className="bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl h-12 flex-1">
               Hapus
             </Button>

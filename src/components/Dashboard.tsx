@@ -27,12 +27,20 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
   const currentYear = new Date().getFullYear();
 
   const monthlyTransactions = transactions.filter(t => {
+    if (!t.tanggal) return false;
     const d = new Date(t.tanggal);
-    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    const dateToCompare = isNaN(d.getTime()) ? (() => {
+      const parts = t.tanggal.split('/');
+      if (parts.length === 3) return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+      return new Date(NaN);
+    })() : d;
+
+    if (isNaN(dateToCompare.getTime())) return false;
+    return dateToCompare.getMonth() === currentMonth && dateToCompare.getFullYear() === currentYear;
   });
 
   const totalRevenue = monthlyTransactions
-    .filter(t => t.kategori === 'Penjualan')
+    .filter(t => t.jenis === 'Pemasukan')
     .reduce((acc, t) => acc + t.nominal, 0);
   
   const totalExpense = monthlyTransactions
@@ -50,7 +58,7 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
     d.setDate(d.getDate() - (6 - i));
     const dateStr = d.toISOString().split('T')[0];
     const daySales = transactions
-      .filter(t => t.tanggal === dateStr && t.kategori === 'Penjualan')
+      .filter(t => t.tanggal === dateStr && t.jenis === 'Pemasukan')
       .reduce((acc, t) => acc + t.nominal, 0);
     return {
       name: d.toLocaleDateString('id-ID', { weekday: 'short' }),

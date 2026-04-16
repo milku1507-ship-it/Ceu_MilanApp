@@ -21,9 +21,10 @@ import {
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-import { auth, db, doc, setDoc, deleteDoc, OperationType, handleFirestoreError } from '../lib/firebase';
+import { auth, db, doc, setDoc, deleteDoc, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
 import { useSettings } from '../SettingsContext';
 import { formatSmartUnit } from '../lib/unitUtils';
+import { formatCurrency } from '../lib/formatUtils';
 
 interface StockManagerProps {
   user: User | null;
@@ -77,7 +78,7 @@ export default function StockManager({ user, ingredients, setIngredients, transa
 
     if (user) {
       try {
-        await setDoc(doc(db, `users/${user.uid}/stok/${id}`), updatedIngredient);
+        await setDoc(doc(db, `users/${user.uid}/stok/${id}`), sanitizeData(updatedIngredient));
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/stok/${id}`);
       }
@@ -93,7 +94,7 @@ export default function StockManager({ user, ingredients, setIngredients, transa
         // Optimistic update
         setIngredients(prev => prev.map(i => i.id === editingIngredient.id ? editingIngredient : i));
         
-        await setDoc(doc(db, `users/${user.uid}/stok/${editingIngredient.id}`), editingIngredient);
+        await setDoc(doc(db, `users/${user.uid}/stok/${editingIngredient.id}`), sanitizeData(editingIngredient));
         setIsEditDialogOpen(false);
         setEditingIngredient(null);
         toast.success(`Bahan ${editingIngredient.name} berhasil diperbarui ✓`);
@@ -560,7 +561,7 @@ const StockCard: React.FC<{
             </div>
             <div className="text-right">
               <p className="text-[10px] font-bold text-gray-400 uppercase">Nilai Stok</p>
-              <p className="text-sm font-black text-orange-500">Rp {(item.currentStock * (item.price || 0)).toLocaleString()}</p>
+              <p className="text-sm font-black text-orange-500">{formatCurrency(item.currentStock * (item.price || 0), true)}</p>
             </div>
           </div>
 

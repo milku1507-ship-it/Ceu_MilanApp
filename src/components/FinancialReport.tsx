@@ -19,10 +19,19 @@ export default function FinancialReport({ transactions, products }: FinancialRep
   const [period, setPeriod] = React.useState('Bulan Ini');
 
   const filteredTransactions = transactions.filter(t => {
+    if (!t.tanggal) return false;
     const d = new Date(t.tanggal);
+    const dateToCompare = isNaN(d.getTime()) ? (() => {
+      const parts = t.tanggal.split('/');
+      if (parts.length === 3) return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+      return new Date(NaN);
+    })() : d;
+
+    if (isNaN(dateToCompare.getTime())) return false;
+    
     const now = new Date();
-    if (period === 'Bulan Ini') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    if (period === 'Tahun Ini') return d.getFullYear() === now.getFullYear();
+    if (period === 'Bulan Ini') return dateToCompare.getMonth() === now.getMonth() && dateToCompare.getFullYear() === now.getFullYear();
+    if (period === 'Tahun Ini') return dateToCompare.getFullYear() === now.getFullYear();
     return true;
   });
 
@@ -226,7 +235,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
                   <div key={idx} className="grid grid-cols-3 items-center p-4 bg-gray-50 rounded-2xl">
                     <div className="font-bold text-[#1A1A2E] text-sm">{item.name}</div>
                     <div className="text-center text-xs font-bold text-gray-500">{item.count}x</div>
-                    <div className="text-right font-black text-red-500 text-sm">Rp {item.total.toLocaleString()}</div>
+                    <div className="text-right font-black text-red-500 text-sm">{formatCurrency(item.total, true)}</div>
                   </div>
                 ))}
                 {expenseTableData.length === 0 && (
@@ -270,10 +279,10 @@ export default function FinancialReport({ transactions, products }: FinancialRep
                           </Badge>
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-bold text-gray-400">
-                          <div>HPP: <span className="text-gray-600">Rp {Math.round(hppPcs).toLocaleString()}</span></div>
-                          <div>Jual: <span className="text-gray-600">Rp {v.harga_jual.toLocaleString()}</span></div>
+                          <div>HPP: <span className="text-gray-600">{formatCurrency(Math.round(hppPcs), true)}</span></div>
+                          <div>Jual: <span className="text-gray-600">{formatCurrency(v.harga_jual, true)}</span></div>
                           <div>Terjual: <span className="text-orange-500">{qtyTerjual} pcs</span></div>
-                          <div className="text-right">Est: <span className="text-green-600">Rp {estPendapatan.toLocaleString()}</span></div>
+                          <div className="text-right">Est: <span className="text-green-600">{formatCurrency(estPendapatan, true)}</span></div>
                         </div>
                       </div>
                     );
