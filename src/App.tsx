@@ -183,7 +183,7 @@ function AppContent() {
       const markOnboardingDone = async () => {
         try {
           const newSettings = { ...storeSettings, onboardingCompleted: true };
-          await setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), newSettings);
+          await setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), sanitizeData(newSettings));
           setStoreSettings(newSettings);
         } catch (e) {
           console.warn('Auto-onboarding update failed:', e);
@@ -223,7 +223,7 @@ function AppContent() {
     const batch = writeBatch(db);
     try {
       newIngredients.forEach(ing => {
-        batch.set(doc(db, `users/${user.uid}/stok/${ing.id}`), JSON.parse(JSON.stringify(ing)));
+        batch.set(doc(db, `users/${user.uid}/stok/${ing.id}`), sanitizeData(ing));
       });
       await batch.commit();
     } catch (error) {
@@ -251,15 +251,15 @@ function AppContent() {
       }
 
       localIngredients.forEach((ing: Ingredient) => {
-        batch.set(doc(db, `users/${uid}/stok/${ing.id}`), JSON.parse(JSON.stringify(ing)));
+        batch.set(doc(db, `users/${uid}/stok/${ing.id}`), sanitizeData(ing));
       });
 
       localProducts.forEach((prod: Product) => {
-        batch.set(doc(db, `users/${uid}/hpp/${prod.id}`), JSON.parse(JSON.stringify(prod)));
+        batch.set(doc(db, `users/${uid}/hpp/${prod.id}`), sanitizeData(prod));
       });
 
       localTransactions.forEach((tx: Transaction) => {
-        batch.set(doc(db, `users/${uid}/transaksi/${tx.id}`), JSON.parse(JSON.stringify(tx)));
+        batch.set(doc(db, `users/${uid}/transaksi/${tx.id}`), sanitizeData(tx));
       });
 
       await batch.commit();
@@ -285,13 +285,13 @@ function AppContent() {
     
     try {
       INITIAL_INGREDIENTS.forEach(ing => {
-        batch.set(doc(db, `users/${uid}/stok/${ing.id}`), JSON.parse(JSON.stringify(ing)));
+        batch.set(doc(db, `users/${uid}/stok/${ing.id}`), sanitizeData(ing));
       });
       INITIAL_PRODUCTS.forEach(p => {
-        batch.set(doc(db, `users/${uid}/hpp/${p.id}`), JSON.parse(JSON.stringify(p)));
+        batch.set(doc(db, `users/${uid}/hpp/${p.id}`), sanitizeData(p));
       });
       SAMPLE_TRANSACTIONS.forEach(t => {
-        batch.set(doc(db, `users/${uid}/transaksi/${t.id}`), JSON.parse(JSON.stringify(t)));
+        batch.set(doc(db, `users/${uid}/transaksi/${t.id}`), sanitizeData(t));
       });
       
       // Mark onboarding as completed
@@ -318,7 +318,7 @@ function AppContent() {
     }
     try {
       const newSettings = { ...storeSettings, onboardingCompleted: true };
-      await setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), newSettings);
+      await setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), sanitizeData(newSettings));
       setStoreSettings(newSettings);
       handleTabChange('hpp');
     } catch (error) {
@@ -361,12 +361,12 @@ function AppContent() {
         
         if (existingIng) {
           if (existingIng.category !== m.kelompok || existingIng.price !== m.harga || existingIng.unit !== m.satuan || existingIng.name !== m.nama) {
-            batch.update(stockRef, {
+            batch.update(stockRef, sanitizeData({
               name: m.nama || '',
               category: m.kelompok || 'Lainnya',
               price: Number(m.harga) || 0,
               unit: m.satuan || 'gram'
-            });
+            }));
             hasChanges = true;
           }
         } else {
@@ -438,7 +438,7 @@ function AppContent() {
       if (user) {
         const batch = writeBatch(db);
         ingredients.forEach(i => {
-          batch.update(doc(db, `users/${user.uid}/stok/${i.id}`), { currentStock: 0 });
+          batch.update(doc(db, `users/${user.uid}/stok/${i.id}`), sanitizeData({ currentStock: 0 }));
         });
         
         // Background sync
@@ -492,7 +492,7 @@ function AppContent() {
   if (!isAuthReady) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#F5F7FA] space-y-4">
-        <div className="w-12 h-12 border-4 border-orange-200 border-t-[#FF6B35] rounded-full animate-spin" />
+        <div className="w-12 h-12 border-4 border-brand-200 border-t-primary rounded-full animate-spin" />
       </div>
     );
   }
@@ -559,7 +559,7 @@ function AppContent() {
           // These are placeholders for now
           return (
             <div className="flex flex-col items-center justify-center p-12 text-center space-y-4">
-              <div className="w-20 h-20 rounded-full bg-orange-50 flex items-center justify-center text-[#FF6B35]">
+            <div className="w-20 h-20 rounded-full bg-brand-50 flex items-center justify-center text-primary">
                 <Store className="w-10 h-10" />
               </div>
               <h2 className="text-2xl font-black text-[#1A1A2E]">Fitur Segera Hadir</h2>

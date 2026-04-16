@@ -1,40 +1,40 @@
 @import "tailwindcss";
 
 @theme {
-  --color-wallet-blue: #118EEA;
-  --color-wallet-blue-dark: #0073E6;
-  --color-wallet-orange: #FF6B35;
-  --color-wallet-orange-dark: #E55A25;
-  --color-bg-wallet: #F5F7FA;
+  --color-wallet-blue: #E53935;
+  --color-wallet-blue-dark: #B71C1C;
+  --color-wallet-orange: #FF5252;
+  --color-wallet-orange-dark: #D32F2F;
+  --color-bg-wallet: #FDFDFD;
   
-  --color-brand-50: #fff7ed;
-  --color-brand-100: #ffedd5;
-  --color-brand-200: #fed7aa;
-  --color-brand-300: #fdba74;
-  --color-brand-400: #fb923c;
-  --color-brand-500: #f97316;
-  --color-brand-600: #ea580c;
-  --color-brand-700: #c2410c;
-  --color-brand-800: #9a3412;
-  --color-brand-900: #7c2d12;
-  --color-brand-950: #431407;
+  --color-brand-50: #fff5f5;
+  --color-brand-100: #ffe3e3;
+  --color-brand-200: #ffc9c9;
+  --color-brand-300: #ffa8a8;
+  --color-brand-400: #ff8787;
+  --color-brand-500: #fa5252;
+  --color-brand-600: #f03e3e;
+  --color-brand-700: #e03131;
+  --color-brand-800: #c92a2a;
+  --color-brand-900: #b01e1e;
+  --color-brand-950: #4a0e0e;
 
-  --color-accent-50: #fefce8;
-  --color-accent-100: #fef9c3;
-  --color-accent-200: #fef08a;
-  --color-accent-300: #fde047;
-  --color-accent-400: #facc15;
-  --color-accent-500: #eab308;
-  --color-accent-600: #ca8a04;
-  --color-accent-700: #a16207;
-  --color-accent-800: #854d0e;
-  --color-accent-900: #713f12;
-  --color-accent-950: #422006;
+  --color-accent-50: #fffbeb;
+  --color-accent-100: #fef3c7;
+  --color-accent-200: #fde68a;
+  --color-accent-300: #fcd34d;
+  --color-accent-400: #fbbf24;
+  --color-accent-500: #f59e0b;
+  --color-accent-600: #d97706;
+  --color-accent-700: #b45309;
+  --color-accent-800: #92400e;
+  --color-accent-900: #78350f;
+  --color-accent-950: #451a03;
 }
 
 @layer base {
   body {
-    @apply bg-brand-50 text-brand-950;
+    @apply bg-white text-gray-900;
   }
 }
 @import "tw-animate-css";
@@ -92,7 +92,7 @@
     --card-foreground: oklch(0.145 0 0);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
+    --primary: #E53935;
     --primary-foreground: oklch(0.985 0 0);
     --secondary: oklch(0.97 0 0);
     --secondary-foreground: oklch(0.205 0 0);
@@ -103,21 +103,21 @@
     --destructive: oklch(0.577 0.245 27.325);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
+    --ring: #E53935;
+    --chart-1: #E53935;
+    --chart-2: #FF5252;
+    --chart-3: #FFD600;
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
     --radius: 0.625rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary: #E53935;
     --sidebar-primary-foreground: oklch(0.985 0 0);
     --sidebar-accent: oklch(0.97 0 0);
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --sidebar-ring: #E53935;
 }
 
 .dark {
@@ -127,7 +127,7 @@
     --card-foreground: oklch(0.985 0 0);
     --popover: oklch(0.205 0 0);
     --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
+    --primary: #FF5252;
     --primary-foreground: oklch(0.205 0 0);
     --secondary: oklch(0.269 0 0);
     --secondary-foreground: oklch(0.985 0 0);
@@ -138,20 +138,20 @@
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
+    --ring: #FF5252;
+    --chart-1: #FF5252;
+    --chart-2: #E53935;
+    --chart-3: #FFD600;
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
     --sidebar: oklch(0.205 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary: #FF5252;
     --sidebar-primary-foreground: oklch(0.985 0 0);
     --sidebar-accent: oklch(0.269 0 0);
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --sidebar-ring: #FF5252;
 }
 
 @layer base {
@@ -167,11 +167,11 @@
 }
 
 .wallet-gradient {
-  background: linear-gradient(135deg, #118EEA 0%, #0073E6 100%);
+  background: linear-gradient(135deg, #E53935 0%, #B71C1C 100%);
 }
 
 .orange-gradient {
-  background: linear-gradient(135deg, #FF6B35 0%, #E55A25 100%);
+  background: linear-gradient(135deg, #FF5252 0%, #D32F2F 100%);
 }
 
 .glass-card {

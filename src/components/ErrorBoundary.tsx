@@ -64,7 +64,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             </div>
             <Button 
               onClick={() => window.location.reload()}
-              className="w-full h-12 rounded-2xl orange-gradient text-white font-bold flex items-center justify-center gap-2"
+              className="w-full h-12 rounded-2xl orange-gradient text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-brand-200"
             >
               <RefreshCcw className="w-4 h-4" />
               Muat Ulang Aplikasi

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { auth, db, doc, onSnapshot, setDoc, OperationType, handleFirestoreError } from './lib/firebase';
+import { auth, db, doc, onSnapshot, setDoc, OperationType, handleFirestoreError, sanitizeData } from './lib/firebase';
 import { KategoriSettings } from './types';
 
 interface SettingsContextType {
@@ -28,7 +28,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             setSettings(snap.data() as KategoriSettings);
           } else {
             // Initialize with defaults if not exists
-            setDoc(ref, DEFAULT_KATEGORI).catch(err => 
+            setDoc(ref, sanitizeData(DEFAULT_KATEGORI)).catch(err => 
               handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/settings/kategori`)
             );
             setSettings(DEFAULT_KATEGORI);

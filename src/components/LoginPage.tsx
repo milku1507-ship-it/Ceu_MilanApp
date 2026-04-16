@@ -48,7 +48,7 @@ export default function LoginPage({ settings }: LoginPageProps) {
       <div className="w-full max-w-md space-y-8 text-center">
         <div className="space-y-4">
           <div className="flex justify-center">
-            <div className="w-24 h-24 rounded-[2rem] bg-white shadow-xl shadow-orange-100 flex items-center justify-center overflow-hidden border-4 border-white">
+            <div className="w-24 h-24 rounded-[2rem] bg-white shadow-xl shadow-brand-200 flex items-center justify-center overflow-hidden border-4 border-white">
               {settings.logo ? (
                 <img 
                   src={settings.logo} 
@@ -73,7 +73,7 @@ export default function LoginPage({ settings }: LoginPageProps) {
           <Button 
             onClick={handleGoogleLogin}
             disabled={isLoading}
-            className="w-full h-14 rounded-2xl orange-gradient text-white font-bold flex items-center justify-center gap-3 shadow-lg shadow-orange-100 hover:scale-[1.02] active:scale-95 transition-all"
+            className="w-full h-14 rounded-2xl orange-gradient text-white font-bold flex items-center justify-center gap-3 shadow-lg shadow-brand-200 hover:scale-[1.02] active:scale-95 transition-all"
           >
             {isLoading ? (
               <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

@@ -105,7 +105,7 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
               className="w-12 h-12 object-contain rounded-xl max-h-[60px]" 
             />
           ) : (
-            <div className="w-10 h-10 rounded-2xl orange-gradient flex items-center justify-center text-white font-black shadow-lg shadow-orange-200">
+            <div className="w-10 h-10 rounded-2xl orange-gradient flex items-center justify-center text-white font-black shadow-lg shadow-brand-200">
               {storeSettings.name.charAt(0)}
             </div>
           )}
@@ -116,7 +116,7 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
               key={item.id}
               className={cn(
                 "w-full flex flex-col items-center justify-center gap-1 p-2 rounded-2xl transition-all",
-                activeTab === item.id ? "bg-orange-50 text-[#FF6B35]" : "text-gray-400 hover:bg-gray-50"
+                activeTab === item.id ? "bg-brand-50 text-primary" : "text-gray-400 hover:bg-gray-50"
               )}
               onClick={() => setActiveTab(item.id)}
             >
@@ -248,7 +248,7 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
                             className={cn(
                               "w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all font-bold text-sm",
                               activeTab === item.id 
-                                ? "bg-orange-50 text-[#FF6B35]" 
+                                ? "bg-brand-50 text-primary" 
                                 : item.variant === 'danger'
                                   ? "text-red-500 hover:bg-red-50"
                                   : "text-gray-600 hover:bg-gray-50"
@@ -289,11 +289,11 @@ export default function Layout({ children, activeTab, setActiveTab, onResetData,
           <div className="relative -top-6">
             <button 
               onClick={() => setActiveTab('transactions')}
-              className="w-16 h-16 rounded-full orange-gradient flex items-center justify-center text-white shadow-xl shadow-orange-200 border-4 border-white active:scale-90 transition-transform"
+              className="w-16 h-16 rounded-full orange-gradient flex items-center justify-center text-white shadow-xl shadow-brand-200 border-4 border-white active:scale-90 transition-transform"
             >
               <Plus className="w-8 h-8" />
             </button>
-            <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-[#FF6B35] uppercase">Bayar</span>
+            <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-primary uppercase">Bayar</span>
           </div>
 
           {NAV_ITEMS.filter(i => i.id !== 'hpp').slice(2, 4).map((item) => (
@@ -311,7 +311,7 @@ function TabButton({ item, activeTab, setActiveTab }: any) {
       onClick={() => setActiveTab(item.id)}
       className={cn(
         "flex flex-col items-center justify-center gap-1 flex-1 h-full transition-colors relative",
-        activeTab === item.id ? "text-[#FF6B35]" : "text-gray-400"
+        activeTab === item.id ? "text-primary" : "text-gray-400"
       )}
     >
       <item.icon className={cn("w-6 h-6", activeTab === item.id ? "stroke-[2.5px]" : "stroke-[2px]")} />
@@ -319,7 +319,7 @@ function TabButton({ item, activeTab, setActiveTab }: any) {
       {activeTab === item.id && (
         <motion.div 
           layoutId="activeTab"
-          className="absolute top-0 w-12 h-1 bg-[#FF6B35] rounded-b-full"
+          className="absolute top-0 w-12 h-1 bg-primary rounded-b-full"
         />
       )}
     </button>

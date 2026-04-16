@@ -79,7 +79,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
         <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
           <CardHeader className="bg-white border-b border-gray-50">
             <CardTitle className="text-xl font-black flex items-center gap-2">
-              <Store className="w-5 h-5 text-[#FF6B35]" />
+              <Store className="w-5 h-5 text-primary" />
               Identitas Toko
             </CardTitle>
             <CardDescription>Informasi dasar toko Anda</CardDescription>
@@ -126,7 +126,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                   value={localSettings.name} 
                   onChange={e => setLocalSettings(prev => ({ ...prev, name: e.target.value }))}
                   placeholder="Masukkan nama toko"
-                  className="rounded-2xl h-12 border-gray-100 focus:ring-[#FF6B35]"
+                  className="rounded-2xl h-12 border-gray-100 focus:ring-primary"
                 />
               </div>
               <div className="space-y-2">
@@ -135,7 +135,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                   value={localSettings.tagline || ''} 
                   onChange={e => setLocalSettings(prev => ({ ...prev, tagline: e.target.value }))}
                   placeholder="Contoh: Jajanan Enak Setiap Hari"
-                  className="rounded-2xl h-12 border-gray-100 focus:ring-[#FF6B35]"
+                  className="rounded-2xl h-12 border-gray-100 focus:ring-primary"
                 />
               </div>
               <div className="space-y-2">
@@ -144,7 +144,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                   value={localSettings.phone || ''} 
                   onChange={e => setLocalSettings(prev => ({ ...prev, phone: e.target.value }))}
                   placeholder="Contoh: 08123456789"
-                  className="rounded-2xl h-12 border-gray-100 focus:ring-[#FF6B35]"
+                  className="rounded-2xl h-12 border-gray-100 focus:ring-primary"
                 />
               </div>
               <div className="space-y-2">
@@ -153,7 +153,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                   value={localSettings.address || ''} 
                   onChange={e => setLocalSettings(prev => ({ ...prev, address: e.target.value }))}
                   placeholder="Masukkan alamat lengkap toko"
-                  className="w-full min-h-[100px] p-4 rounded-2xl border border-gray-100 focus:ring-2 focus:ring-[#FF6B35] focus:outline-none text-sm font-medium"
+                  className="w-full min-h-[100px] p-4 rounded-2xl border border-gray-100 focus:ring-2 focus:ring-primary focus:outline-none text-sm font-medium"
                 />
               </div>
             </div>
@@ -164,7 +164,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
         <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
           <CardHeader className="bg-white border-b border-gray-50">
             <CardTitle className="text-xl font-black flex items-center gap-2">
-              <Upload className="w-5 h-5 text-[#FF6B35]" />
+              <Upload className="w-5 h-5 text-primary" />
               Tampilan Logo
             </CardTitle>
             <CardDescription>Atur di mana logo akan ditampilkan</CardDescription>
@@ -199,7 +199,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
         <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
           <CardHeader className="bg-white border-b border-gray-50">
             <CardTitle className="text-xl font-black flex items-center gap-2">
-              <Save className="w-5 h-5 text-[#FF6B35]" />
+              <Save className="w-5 h-5 text-primary" />
               Pengaturan Struk
             </CardTitle>
             <CardDescription>Atur tampilan struk belanja</CardDescription>
@@ -242,7 +242,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                   value={localSettings.receiptFooter || ''} 
                   onChange={e => setLocalSettings(prev => ({ ...prev, receiptFooter: e.target.value }))}
                   placeholder="Contoh: Terima kasih sudah berbelanja!"
-                  className="rounded-2xl h-12 border-gray-100 focus:ring-[#FF6B35]"
+                  className="rounded-2xl h-12 border-gray-100 focus:ring-primary"
                 />
               </div>
             </div>
@@ -253,7 +253,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
         <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
           <CardHeader className="bg-white border-b border-gray-50">
             <CardTitle className="text-xl font-black flex items-center gap-2">
-              <Settings2 className="w-5 h-5 text-[#FF6B35]" />
+              <Settings2 className="w-5 h-5 text-primary" />
               Kustomisasi Kategori
             </CardTitle>
             <CardDescription>Atur kategori HPP, Produk, dan Satuan Unit</CardDescription>
@@ -262,7 +262,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
             <Button 
               onClick={onManageCategories}
               variant="outline"
-              className="w-full h-14 rounded-2xl font-bold border-orange-100 text-[#FF6B35] hover:bg-orange-50 flex items-center justify-between px-6"
+              className="w-full h-14 rounded-2xl font-bold border-brand-100 text-primary hover:bg-brand-50 flex items-center justify-between px-6"
             >
               <div className="flex items-center gap-3">
                 <Settings2 className="w-5 h-5" />
@@ -285,7 +285,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
           <Button 
             onClick={handleSave}
             disabled={isSaving}
-            className="flex-1 h-14 rounded-2xl font-bold orange-gradient text-white shadow-lg shadow-orange-200"
+            className="flex-1 h-14 rounded-2xl font-bold orange-gradient text-white shadow-lg shadow-brand-200"
           >
             {isSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
           </Button>

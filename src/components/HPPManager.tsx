@@ -186,7 +186,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     
     try {
       if (user) {
-        await setDoc(doc(db, `users/${user.uid}/hpp/${id}`), newProduct);
+        await setDoc(doc(db, `users/${user.uid}/hpp/${id}`), sanitizeData(newProduct));
       }
       setProducts(prev => [...prev, newProduct]);
       toast.success(`Produk '${product.nama}' diduplikasi`);
@@ -262,7 +262,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
     try {
       if (user) {
-        await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), updatedProduct);
+        await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
       }
       setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
       toast.success('Varian dihapus');
@@ -286,7 +286,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
     if (user) {
       try {
-        await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), updatedProduct);
+        await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
       }
@@ -342,7 +342,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       
       try {
         if (user) {
-          await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), updatedProduct);
+          await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
         }
         setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
       } catch (error) {
@@ -396,7 +396,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       
       try {
         if (user) {
-          await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), updatedProduct);
+          await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
         }
         setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
       } catch (error) {
@@ -480,11 +480,11 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   // Render Helpers
   const renderBreadcrumbs = () => (
     <div className="flex items-center gap-1.5 text-[9px] md:text-[10px] font-black text-gray-400 mb-4 uppercase tracking-widest overflow-x-auto no-scrollbar whitespace-nowrap py-1">
-      <button onClick={() => setView('products')} className="hover:text-[#FF6B35] transition-colors shrink-0">HPP</button>
+      <button onClick={() => setView('products')} className="hover:text-primary transition-colors shrink-0">HPP</button>
       {view !== 'products' && (
         <>
           <ChevronRight className="w-3 h-3 shrink-0" />
-          <button onClick={() => setView('variants')} className="hover:text-[#FF6B35] transition-colors shrink-0 max-w-[100px] truncate">{selectedProduct?.nama}</button>
+          <button onClick={() => setView('variants')} className="hover:text-primary transition-colors shrink-0 max-w-[100px] truncate">{selectedProduct?.nama}</button>
         </>
       )}
       {view === 'detail' && (
@@ -506,7 +506,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         {view === 'products' && (
           <Button 
             onClick={() => { setEditingProduct(null); setIsProductModalOpen(true); }}
-            className="orange-gradient text-white font-bold rounded-2xl shadow-lg shadow-orange-100 gap-2 h-12 px-6"
+            className="orange-gradient text-white font-bold rounded-2xl shadow-lg shadow-brand-200 gap-2 h-12 px-6"
           >
             <Plus className="w-4 h-4" />
             Produk Baru
@@ -515,7 +515,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         {view === 'variants' && (
           <Button 
             onClick={() => { setEditingVariant(null); setIsVariantModalOpen(true); }}
-            className="orange-gradient text-white font-bold rounded-2xl shadow-lg shadow-orange-100 gap-2 h-12 px-6"
+            className="orange-gradient text-white font-bold rounded-2xl shadow-lg shadow-brand-200 gap-2 h-12 px-6"
           >
             <Plus className="w-4 h-4" />
             Varian Baru
@@ -524,7 +524,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         {view === 'detail' && (
           <Button 
             onClick={handleSaveHpp}
-            className="orange-gradient text-white font-bold rounded-2xl shadow-lg shadow-orange-100 gap-2 h-12 px-6"
+            className="orange-gradient text-white font-bold rounded-2xl shadow-lg shadow-brand-200 gap-2 h-12 px-6"
           >
             <Save className="w-4 h-4" />
             Simpan HPP
@@ -541,7 +541,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             <Card key={p.id} className="border-none shadow-sm rounded-3xl bg-white overflow-hidden group hover:shadow-md transition-all duration-300">
               <CardContent className="p-6">
                 <div className="flex justify-between items-start mb-4">
-                  <div className="p-3 rounded-2xl bg-orange-50 text-[#FF6B35]">
+                  <div className="p-3 rounded-2xl bg-brand-50 text-primary">
                     <Package className="w-6 h-6" />
                   </div>
                   <div className="flex gap-1">
@@ -559,12 +559,12 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                 <h3 className="text-xl font-black text-[#1A1A2E] mb-1">{p.nama}</h3>
                 <p className="text-sm text-gray-500 mb-4 line-clamp-2">{p.deskripsi || 'Tidak ada deskripsi'}</p>
                 <div className="flex items-center justify-between">
-                  <Badge className="bg-orange-100 text-[#FF6B35] border-none font-bold">
+                  <Badge className="bg-brand-100 text-primary border-none font-bold">
                     {p.varian.length} Varian
                   </Badge>
                   <Button 
                     variant="ghost" 
-                    className="text-[#FF6B35] font-bold hover:bg-orange-50 rounded-xl gap-1"
+                    className="text-primary font-bold hover:bg-brand-50 rounded-xl gap-1"
                     onClick={() => handleViewVariants(p.id)}
                   >
                     Lihat Varian
@@ -590,13 +590,13 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                 <Card key={v.id} className="border-none shadow-sm rounded-3xl bg-white overflow-hidden group hover:shadow-md transition-all duration-300">
                   <CardContent className="p-4 md:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-2xl bg-orange-50 flex items-center justify-center text-[#FF6B35] shrink-0">
+                      <div className="w-12 h-12 rounded-2xl bg-brand-50 flex items-center justify-center text-primary shrink-0">
                         <Calculator className="w-6 h-6" />
                       </div>
                       <div className="min-w-0">
                         <h3 className="text-lg font-black text-[#1A1A2E] truncate">{v.nama}</h3>
                         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
-                          <span className="text-[10px] md:text-xs font-bold text-gray-400">HPP: <span className="text-orange-500">{v.bahan.length > 0 ? formatCurrency(Math.round(hppPcs), true) : '—'}</span></span>
+                          <span className="text-[10px] md:text-xs font-bold text-gray-400">HPP: <span className="text-primary">{v.bahan.length > 0 ? formatCurrency(Math.round(hppPcs), true) : '—'}</span></span>
                           <span className="text-[10px] md:text-xs font-bold text-gray-400">Jual: <span className="text-green-600">{formatCurrency(v.harga_jual, true)}</span></span>
                           {v.bahan.length > 0 && (
                             <Badge className="bg-green-100 text-green-700 text-[9px] md:text-[10px] border-none font-black px-2 py-0">
@@ -608,7 +608,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                     </div>
                     <div className="flex items-center gap-2 justify-end sm:justify-start">
                       <Button 
-                        className="bg-[#FF6B35] hover:bg-[#E55A25] text-white font-bold rounded-xl gap-2 flex-1 sm:flex-none"
+                        className="bg-primary hover:bg-primary/90 text-white font-bold rounded-xl gap-2 flex-1 sm:flex-none"
                         onClick={() => handleViewDetail(v.id)}
                       >
                         Hitung HPP
@@ -643,7 +643,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                   <CardTitle className="text-lg font-bold">Komposisi Bahan Baku</CardTitle>
                   <CardDescription>{selectedProduct?.nama} › {activeHppVariant.nama}</CardDescription>
                 </div>
-                <Button variant="outline" size="sm" className="rounded-xl border-orange-100 text-[#FF6B35] font-bold gap-1" onClick={handleAddMaterial}>
+                <Button variant="outline" size="sm" className="rounded-xl border-brand-100 text-primary font-bold gap-1" onClick={handleAddMaterial}>
                   <Plus className="w-4 h-4" />
                   Tambah Bahan
                 </Button>
@@ -665,8 +665,8 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                     return (
                       <div key={cat} className="space-y-3">
                         <div className="flex items-center gap-3 px-2 py-1">
-                          <div className="h-[2px] flex-1 bg-orange-100/50"></div>
-                          <Badge variant="outline" className="bg-orange-50 border-orange-200 text-[#FF6B35] font-black text-[10px] px-3 py-1 rounded-full uppercase tracking-widest">
+                          <div className="h-[2px] flex-1 bg-brand-100/50"></div>
+                          <Badge variant="outline" className="bg-brand-50 border-brand-200 text-primary font-black text-[10px] px-3 py-1 rounded-full uppercase tracking-widest">
                             {cat}
                           </Badge>
                           <Button 
@@ -677,16 +677,16 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                           >
                             <Trash2 className="w-3 h-3" />
                           </Button>
-                          <div className="h-[2px] flex-1 bg-orange-100/50"></div>
+                          <div className="h-[2px] flex-1 bg-brand-100/50"></div>
                         </div>
                         <div className="grid grid-cols-1 gap-3">
                           {catMaterials.map((m) => (
-                            <div key={m.originalIdx} className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm group hover:border-orange-200 transition-all">
+                            <div key={m.originalIdx} className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm group hover:border-brand-200 transition-all">
                               <div className="flex justify-between items-start">
                                 <div className="min-w-0 flex-1">
                                   <h4 className="font-black text-[#1A1A2E] truncate pr-2">{m.nama}</h4>
                                   <div className="flex items-center gap-2 mt-1">
-                                    <Badge className="bg-orange-50 text-[#FF6B35] border-none text-[9px] font-bold uppercase">
+                                    <Badge className="bg-brand-50 text-primary border-none text-[9px] font-bold uppercase">
                                       {m.kelompok}
                                     </Badge>
                                     <span className="text-[10px] font-bold text-gray-400">
@@ -695,7 +695,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                                   </div>
                                 </div>
                                 <div className="text-right shrink-0">
-                                  <p className="text-sm font-black text-[#FF6B35]">
+                                  <p className="text-sm font-black text-primary">
                                     {formatCurrency(m.qty * m.harga, true)}
                                   </p>
                                   <div className="flex gap-1 mt-2 justify-end">
@@ -731,7 +731,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                     <div className="text-center py-12 bg-gray-50 rounded-3xl border-2 border-dashed border-gray-100">
                       <Calculator className="w-12 h-12 text-gray-200 mx-auto mb-3" />
                       <p className="text-gray-400 font-bold">Belum ada bahan baku.</p>
-                      <Button variant="link" className="text-[#FF6B35] font-bold" onClick={handleAddMaterial}>
+                      <Button variant="link" className="text-primary font-bold" onClick={handleAddMaterial}>
                         Tambah bahan sekarang
                       </Button>
                     </div>
@@ -742,7 +742,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
             <div className="space-y-6">
               <Card className="border-none shadow-sm rounded-3xl bg-white overflow-hidden">
-                <div className="bg-[#FF6B35] p-6 text-white">
+                <div className="bg-primary p-6 text-white">
                   <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Total HPP per Batch</p>
                   <h3 className="text-3xl font-black mt-1">{formatCurrency(calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing), true)}</h3>
                   <div className="mt-4 flex items-center gap-2">
@@ -787,7 +787,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                   <Button 
                     onClick={handleSaveHpp}
                     disabled={isSaving}
-                    className="w-full mt-4 orange-gradient text-white font-bold h-12 rounded-2xl shadow-lg shadow-orange-200 gap-2"
+                    className="w-full mt-4 orange-gradient text-white font-bold h-12 rounded-2xl shadow-lg shadow-brand-200 gap-2"
                   >
                     <Save className="w-4 h-4" />
                     {isSaving ? 'Menyimpan...' : 'Simpan Data HPP'}
@@ -832,7 +832,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             </div>
             <DialogFooter className="pt-4">
               <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold">Batal</Button>} />
-              <Button type="submit" disabled={isSaving} className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl font-bold">
+              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold">
                 {isSaving ? 'Menyimpan...' : 'Simpan Produk'}
               </Button>
             </DialogFooter>
@@ -870,7 +870,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             </div>
             <DialogFooter className="pt-4">
               <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold">Batal</Button>} />
-              <Button type="submit" disabled={isSaving} className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl font-bold">
+              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold">
                 {isSaving ? 'Menyimpan...' : 'Simpan Varian'}
               </Button>
             </DialogFooter>
@@ -894,7 +894,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                 id="mat-kelompok" 
                 name="kelompok" 
                 defaultValue={editingMaterial?.material.kelompok || (settings?.kategori_hpp[0] || 'Lainnya')}
-                className="w-full h-10 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B35] font-medium"
+                className="w-full h-10 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium"
               >
                 {settings?.kategori_hpp.map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
@@ -921,7 +921,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             </div>
             <DialogFooter className="pt-4 flex gap-2">
               <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold flex-1">Batal</Button>} />
-              <Button type="submit" disabled={isSaving} className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl font-bold flex-1">
+              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold flex-1">
                 {isSaving ? 'Menyimpan...' : 'Simpan'}
               </Button>
             </DialogFooter>

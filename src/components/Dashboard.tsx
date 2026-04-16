@@ -71,8 +71,8 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
   return (
     <div className="space-y-6 pb-8">
       {showWelcome && (
-        <Card className="border-none shadow-xl rounded-[2.5rem] bg-orange-50 p-8 text-center space-y-4 animate-in fade-in zoom-in duration-500">
-          <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto text-[#FF6B35] shadow-sm">
+        <Card className="border-none shadow-xl rounded-[2.5rem] bg-brand-50 p-8 text-center space-y-4 animate-in fade-in zoom-in duration-500">
+          <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto text-primary shadow-sm">
             <Package className="w-8 h-8" />
           </div>
           <div className="space-y-2">
@@ -86,7 +86,7 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
               Mulai Input HPP
             </Button>
             {onSeedData && (
-              <Button onClick={onSeedData} variant="outline" className="bg-white border-orange-100 text-[#FF6B35] font-bold rounded-2xl px-8 h-12">
+              <Button onClick={onSeedData} variant="outline" className="bg-white border-brand-100 text-primary font-bold rounded-2xl px-8 h-12">
                 Gunakan Data Contoh
               </Button>
             )}
@@ -95,7 +95,7 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
       )}
 
       {/* E-Wallet Header Card */}
-      <div className="relative overflow-hidden wallet-gradient rounded-[2.5rem] p-6 text-white shadow-2xl shadow-blue-200">
+      <div className="relative overflow-hidden wallet-gradient rounded-[2.5rem] p-6 text-white shadow-2xl shadow-brand-200">
         <div className="relative z-10">
           <div className="flex justify-between items-center mb-8">
             <div className="flex items-center gap-3">
@@ -106,12 +106,6 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
                 <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Saldo Laba (Bulan Ini)</p>
                 <h3 className="text-3xl font-black">{formatCurrency(netProfit, true)}</h3>
               </div>
-            </div>
-            <div className="flex flex-col items-end">
-              <Badge className="bg-white/20 backdrop-blur-md text-white border-none font-bold px-3 py-1 mb-1">
-                Premium
-              </Badge>
-              <p className="text-[9px] font-bold opacity-60">Ceumilan Pay</p>
             </div>
           </div>
 
@@ -160,7 +154,7 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
               <CardTitle className="text-lg font-bold text-[#1A1A2E]">Grafik Penjualan</CardTitle>
               <CardDescription>Performa 7 hari terakhir</CardDescription>
             </div>
-            <Badge variant="secondary" className="rounded-full bg-orange-50 text-orange-600 border-none font-bold">
+            <Badge variant="secondary" className="rounded-full bg-brand-50 text-primary border-none font-bold">
               Mingguan
             </Badge>
           </CardHeader>
@@ -170,8 +164,8 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
                 <AreaChart data={last7Days}>
                   <defs>
                     <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#FF6B35" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#FF6B35" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="var(--primary)" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
@@ -185,10 +179,10 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
                     hide
                   />
                   <Tooltip 
-                    cursor={{ stroke: '#FF6B35', strokeWidth: 2 }}
+                    cursor={{ stroke: 'var(--primary)', strokeWidth: 2 }}
                     contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
                   />
-                  <Area type="monotone" dataKey="sales" stroke="#FF6B35" strokeWidth={4} fillOpacity={1} fill="url(#colorSales)" />
+                  <Area type="monotone" dataKey="sales" stroke="var(--primary)" strokeWidth={4} fillOpacity={1} fill="url(#colorSales)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -242,12 +236,12 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
           </div>
           <div className="flex gap-4 overflow-x-auto pb-2 no-scrollbar">
             {lowStockItems.map((item) => (
-              <div key={item.id} className="shrink-0 w-40 p-4 bg-orange-50 rounded-3xl border border-orange-100">
-                <div className="w-8 h-8 rounded-xl bg-white flex items-center justify-center text-orange-500 mb-3 shadow-sm">
+              <div key={item.id} className="shrink-0 w-40 p-4 bg-brand-50 rounded-3xl border border-brand-100">
+                <div className="w-8 h-8 rounded-xl bg-white flex items-center justify-center text-primary mb-3 shadow-sm">
                   <AlertCircle className="w-4 h-4" />
                 </div>
                 <p className="text-xs font-bold text-[#1A1A2E] truncate">{item.name}</p>
-                <p className="text-[10px] font-bold text-orange-600 mt-1">Sisa: {formatSmartUnit(item.currentStock, item.unit)}</p>
+                <p className="text-[10px] font-bold text-primary mt-1">Sisa: {formatSmartUnit(item.currentStock, item.unit)}</p>
               </div>
             ))}
           </div>
@@ -288,7 +282,7 @@ function StatCard({ title, value, icon: Icon, color, isCurrency, isPercentage }:
         </div>
         <div className="mt-4">
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{title}</p>
-          <h3 className="text-xl font-black text-[#1A1A2E] mt-1 group-hover:text-[#FF6B35] transition-colors">{formattedValue}</h3>
+          <h3 className="text-xl font-black text-[#1A1A2E] mt-1 group-hover:text-primary transition-colors">{formattedValue}</h3>
         </div>
       </CardContent>
     </Card>

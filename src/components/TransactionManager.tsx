@@ -590,7 +590,7 @@ export default function TransactionManager({ user, transactions, setTransactions
                         setNewTx(prev => ({ ...prev, tanggal_akhir: prev.tanggal }));
                       }
                     }}
-                    className="w-3 h-3 rounded border-gray-200 text-[#FF6B35] focus:ring-[#FF6B35]"
+                    className="w-3 h-3 rounded border-gray-200 text-primary focus:ring-primary"
                   />
                   <label htmlFor="range-toggle" className="text-[10px] font-bold text-gray-400 uppercase cursor-pointer">Rentang</label>
                 </div>
@@ -660,7 +660,7 @@ export default function TransactionManager({ user, transactions, setTransactions
                       onClick={() => toggleProduct(p.id)}
                       className={cn(
                         "rounded-xl font-bold transition-all",
-                        selectedProductIds.includes(p.id) ? "bg-[#FF6B35] text-white border-none" : "border-gray-100 text-gray-500"
+                        selectedProductIds.includes(p.id) ? "bg-primary text-white border-none" : "border-gray-100 text-gray-500"
                       )}
                     >
                       {p.nama}
@@ -678,7 +678,7 @@ export default function TransactionManager({ user, transactions, setTransactions
                       return (
                         <div key={pid} className="space-y-2 p-3 bg-gray-50 rounded-2xl">
                           <p className="text-xs font-black text-[#1A1A2E] flex items-center gap-2">
-                            <Package className="w-3 h-3 text-[#FF6B35]" />
+                            <Package className="w-3 h-3 text-primary" />
                             {product.nama}
                           </p>
                           <div className="space-y-2">
@@ -791,7 +791,7 @@ export default function TransactionManager({ user, transactions, setTransactions
             <Button 
               onClick={handleAddTransaction}
               disabled={isSaving}
-              className="w-full orange-gradient text-white font-bold h-14 rounded-2xl shadow-lg shadow-orange-100 mt-4 active:scale-95 transition-transform"
+              className="w-full orange-gradient text-white font-bold h-14 rounded-2xl shadow-lg shadow-brand-200 mt-4 active:scale-95 transition-transform"
             >
               {isSaving ? 'Menyimpan...' : 'Simpan Transaksi'}
             </Button>
@@ -804,7 +804,7 @@ export default function TransactionManager({ user, transactions, setTransactions
             <div className="flex items-center gap-3">
               <input 
                 type="checkbox" 
-                className="w-5 h-5 rounded-lg border-gray-200 text-[#FF6B35] focus:ring-[#FF6B35]"
+                className="w-5 h-5 rounded-lg border-gray-200 text-primary focus:ring-primary"
                 checked={filteredTransactions.length > 0 && selectedTxIds.length === filteredTransactions.length}
                 onChange={toggleSelectAll}
               />
@@ -848,8 +848,8 @@ export default function TransactionManager({ user, transactions, setTransactions
                   className={cn(
                     "group flex flex-col p-4 rounded-2xl transition-all border-2",
                     selectedTxIds.includes(t.id) 
-                      ? "bg-orange-50 border-orange-200 shadow-sm" 
-                      : "bg-gray-50 border-transparent hover:bg-orange-50/50"
+                      ? "bg-brand-50 border-brand-200 shadow-sm" 
+                      : "bg-gray-50 border-transparent hover:bg-brand-50/50"
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -857,7 +857,7 @@ export default function TransactionManager({ user, transactions, setTransactions
                       <div className="pt-1">
                         <input 
                           type="checkbox" 
-                          className="w-5 h-5 rounded-lg border-gray-200 text-[#FF6B35] focus:ring-[#FF6B35] cursor-pointer"
+                          className="w-5 h-5 rounded-lg border-gray-200 text-primary focus:ring-primary cursor-pointer"
                           checked={selectedTxIds.includes(t.id)}
                           onChange={() => toggleSelectTx(t.id)}
                         />
@@ -906,7 +906,7 @@ export default function TransactionManager({ user, transactions, setTransactions
                     <div className="mt-3 pt-3 border-t border-dashed border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
                       {Array.from(new Map(t.penjualan_detail.map(pd => [pd.produk_id, pd])).values()).map((pd, pdIdx) => (
                         <div key={`${pd.produk_id}-${pdIdx}`} className="text-[10px] text-gray-500 bg-white/50 p-1.5 rounded-lg border border-gray-100/50 flex items-start gap-1.5">
-                          <Package className="w-3 h-3 text-[#FF6B35] shrink-0 mt-0.5" />
+                          <Package className="w-3 h-3 text-primary shrink-0 mt-0.5" />
                           <div className="min-w-0">
                             <span className="font-black text-[#1A1A2E]">{pd.produk_nama}: </span>
                             <span className="font-medium">
@@ -951,7 +951,7 @@ export default function TransactionManager({ user, transactions, setTransactions
             <Button 
               onClick={() => confirmDelete(true)}
               disabled={isDeleting}
-              className="orange-gradient text-white font-bold rounded-2xl h-12 flex-1"
+              className="orange-gradient text-white font-bold rounded-2xl h-12 flex-1 shadow-lg shadow-brand-200"
             >
               {isDeleting ? 'Memproses...' : 'Ya, Kembalikan Stok'}
             </Button>
@@ -979,7 +979,7 @@ export default function TransactionManager({ user, transactions, setTransactions
             <Button 
               onClick={() => confirmBulkDelete(true)}
               disabled={isDeleting}
-              className="orange-gradient text-white font-bold rounded-2xl h-12 flex-1"
+              className="orange-gradient text-white font-bold rounded-2xl h-12 flex-1 shadow-lg shadow-brand-200"
             >
               {isDeleting ? 'Memproses...' : 'Ya, Kembalikan Stok'}
             </Button>

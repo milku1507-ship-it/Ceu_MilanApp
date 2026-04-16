@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Plus, Edit2, Trash2, Check, X, Settings2, Package, Layers, Ruler, ArrowLeft } from 'lucide-react';
 import { useSettings, DEFAULT_KATEGORI } from '../SettingsContext';
-import { auth, db, doc, updateDoc, arrayUnion, arrayRemove, collection, query, where, getDocs, OperationType, handleFirestoreError } from '../lib/firebase';
+import { auth, db, doc, updateDoc, arrayUnion, arrayRemove, collection, query, where, getDocs, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
 import { toast } from 'sonner';
 
 interface CategoryManagerProps {
@@ -36,9 +36,9 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
     setIsSaving(true);
     try {
       const ref = doc(db, `users/${user.uid}/settings/kategori`);
-      await updateDoc(ref, {
+      await updateDoc(ref, sanitizeData({
         [field]: arrayUnion(newItemValue.trim())
-      });
+      }));
       setNewItemValue('');
       toast.success('Berhasil ditambahkan ✓');
     } catch (error) {
@@ -71,9 +71,9 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
       }
 
       const ref = doc(db, `users/${user.uid}/settings/kategori`);
-      await updateDoc(ref, {
+      await updateDoc(ref, sanitizeData({
         [field]: arrayRemove(value)
-      });
+      }));
       toast.success('Berhasil dihapus');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/settings/kategori`);
@@ -94,8 +94,8 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
       const ref = doc(db, `users/${user.uid}/settings/kategori`);
       // Firestore doesn't have a direct "update item in array"
       // So we remove old and add new
-      await updateDoc(ref, { [field]: arrayRemove(oldValue) });
-      await updateDoc(ref, { [field]: arrayUnion(editValue.trim()) });
+      await updateDoc(ref, sanitizeData({ [field]: arrayRemove(oldValue) }));
+      await updateDoc(ref, sanitizeData({ [field]: arrayUnion(editValue.trim()) }));
       
       setEditingItem(null);
       toast.success('Berhasil diperbarui ✓');
@@ -110,7 +110,7 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="p-2 bg-orange-50 rounded-lg text-[#FF6B35] shrink-0">
+          <div className="p-2 bg-brand-50 rounded-lg text-primary shrink-0">
             {icon}
           </div>
           <h3 className="font-black text-gray-800 text-sm md:text-base">{title}</h3>
@@ -125,7 +125,7 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
           className="rounded-xl"
           onKeyDown={(e) => e.key === 'Enter' && handleAddItem(field)}
         />
-        <Button onClick={() => handleAddItem(field)} disabled={isSaving} className="bg-[#FF6B35] hover:bg-[#E55A25] text-white rounded-xl">
+        <Button onClick={() => handleAddItem(field)} disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl">
           {isSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
         </Button>
       </div>
@@ -179,7 +179,7 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
             <Button variant="ghost" size="icon" onClick={onBack} className="rounded-full -ml-1 h-9 w-9">
               <ArrowLeft className="w-5 h-5" />
             </Button>
-            <div className="p-2.5 bg-orange-50 rounded-xl text-[#FF6B35] shrink-0">
+            <div className="p-2.5 bg-brand-50 rounded-xl text-primary shrink-0">
               <Settings2 className="w-5 h-5 md:w-6 md:h-6" />
             </div>
           </div>
@@ -192,9 +192,9 @@ export default function CategoryManager({ onBack }: CategoryManagerProps) {
       <CardContent className="p-5 md:p-8">
         <Tabs defaultValue="hpp" className="space-y-6 md:space-y-8">
           <TabsList className="bg-white p-1 rounded-xl md:rounded-2xl border border-gray-100 w-full flex h-11 md:h-14">
-            <TabsTrigger value="hpp" className="rounded-lg md:rounded-xl font-black text-[10px] md:text-sm flex-1 data-active:bg-orange-50 data-active:text-[#FF6B35]">HPP</TabsTrigger>
-            <TabsTrigger value="produk" className="rounded-lg md:rounded-xl font-black text-[10px] md:text-sm flex-1 data-active:bg-orange-50 data-active:text-[#FF6B35]">Produk</TabsTrigger>
-            <TabsTrigger value="unit" className="rounded-lg md:rounded-xl font-black text-[10px] md:text-sm flex-1 data-active:bg-orange-50 data-active:text-[#FF6B35]">Satuan</TabsTrigger>
+            <TabsTrigger value="hpp" className="rounded-lg md:rounded-xl font-black text-[10px] md:text-sm flex-1 data-active:bg-brand-50 data-active:text-primary">HPP</TabsTrigger>
+            <TabsTrigger value="produk" className="rounded-lg md:rounded-xl font-black text-[10px] md:text-sm flex-1 data-active:bg-brand-50 data-active:text-primary">Produk</TabsTrigger>
+            <TabsTrigger value="unit" className="rounded-lg md:rounded-xl font-black text-[10px] md:text-sm flex-1 data-active:bg-brand-50 data-active:text-primary">Satuan</TabsTrigger>
           </TabsList>
 
           <TabsContent value="hpp">

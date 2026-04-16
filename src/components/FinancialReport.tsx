@@ -73,7 +73,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
     })
     .filter(item => item.total > 0 || item.count > 0);
 
-  const COLORS = ['#FF6B35', '#4ADE80', '#60A5FA', '#F472B6', '#A78BFA', '#FBBF24', '#94A3B8'];
+  const COLORS = ['#E53935', '#4ADE80', '#60A5FA', '#F472B6', '#A78BFA', '#FBBF24', '#94A3B8'];
 
   const exportCSV = () => {
     const headers = ['Tanggal', 'Keterangan', 'Kategori', 'Jenis', 'Nominal'];
@@ -118,7 +118,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
         <div className="flex gap-3">
           <Select value={period} onValueChange={setPeriod}>
             <SelectTrigger className="w-[150px] rounded-2xl border-none shadow-sm bg-white font-bold">
-              <Calendar className="w-4 h-4 mr-2 text-[#FF6B35]" />
+              <Calendar className="w-4 h-4 mr-2 text-primary" />
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="rounded-2xl">
@@ -130,7 +130,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
           <Button 
             onClick={exportCSV}
             variant="outline" 
-            className="rounded-2xl border-none shadow-sm bg-white font-bold gap-2 text-gray-600 hover:text-[#FF6B35]"
+            className="rounded-2xl border-none shadow-sm bg-white font-bold gap-2 text-gray-600 hover:text-primary"
           >
             <Download className="w-4 h-4" />
             Export CSV
@@ -184,7 +184,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
           <Card className="border-none shadow-sm rounded-3xl bg-white">
             <CardHeader>
               <CardTitle className="text-lg font-bold flex items-center gap-2">
-                <PieIcon className="w-5 h-5 text-[#FF6B35]" />
+                <PieIcon className="w-5 h-5 text-primary" />
                 Alokasi Pengeluaran
               </CardTitle>
               <CardDescription>Distribusi biaya operasional</CardDescription>
@@ -259,7 +259,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
             {products.map((p, pIdx) => (
               <div key={`${p.id}-${pIdx}`} className="space-y-3">
                 <p className="text-xs font-black text-[#1A1A2E] flex items-center gap-2 px-1">
-                  <Package className="w-3 h-3 text-[#FF6B35]" />
+                  <Package className="w-3 h-3 text-primary" />
                   {p.nama.toUpperCase()}
                 </p>
                 <div className="space-y-2">
@@ -271,7 +271,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
                     const estPendapatan = qtyTerjual * v.harga_jual;
                     
                     return (
-                      <div key={`${v.id}-${vIdx}`} className="p-4 bg-gray-50 rounded-2xl group hover:bg-orange-50 transition-colors">
+                      <div key={`${v.id}-${vIdx}`} className="p-4 bg-gray-50 rounded-2xl group hover:bg-brand-50 transition-colors">
                         <div className="flex justify-between items-center mb-2">
                           <span className="font-bold text-[#1A1A2E]">{v.nama}</span>
                           <Badge className="bg-blue-100 text-blue-600 border-none font-black text-[10px]">
@@ -281,7 +281,7 @@ export default function FinancialReport({ transactions, products }: FinancialRep
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-bold text-gray-400">
                           <div>HPP: <span className="text-gray-600">{formatCurrency(Math.round(hppPcs), true)}</span></div>
                           <div>Jual: <span className="text-gray-600">{formatCurrency(v.harga_jual, true)}</span></div>
-                          <div>Terjual: <span className="text-orange-500">{qtyTerjual} pcs</span></div>
+                          <div>Terjual: <span className="text-primary">{qtyTerjual} pcs</span></div>
                           <div className="text-right">Est: <span className="text-green-600">{formatCurrency(estPendapatan, true)}</span></div>
                         </div>
                       </div>

@@ -67,7 +67,7 @@ export default function StockManager({ user, ingredients, setIngredients, transa
     if (newStock <= ingredient.minStock && ingredient.currentStock > ingredient.minStock) {
       toast.warning(`Stok ${ingredient.name} menipis!`, {
         description: `Sisa stok: ${formatSmartUnit(newStock, ingredient.unit)}`,
-        icon: <AlertCircle className="w-4 h-4 text-orange-500" />
+        icon: <AlertCircle className="w-4 h-4 text-primary" />
       });
     }
 
@@ -143,7 +143,7 @@ export default function StockManager({ user, ingredients, setIngredients, transa
             <Button 
               onClick={() => setIsResetDialogOpen(true)}
               variant="outline"
-              className="border-orange-100 text-[#FF6B35] font-bold rounded-2xl gap-2 h-12 px-4 bg-white hover:bg-orange-50"
+              className="border-brand-100 text-primary font-bold rounded-2xl gap-2 h-12 px-4 bg-white hover:bg-brand-50"
             >
               <Trash2 className="w-4 h-4" />
               Kosongkan Qty
@@ -191,7 +191,7 @@ export default function StockManager({ user, ingredients, setIngredients, transa
           </div>
         </Card>
         <Card className="border-none shadow-sm rounded-3xl bg-white p-4 flex flex-col sm:flex-row items-center sm:items-center gap-3 sm:gap-4 min-w-0">
-          <div className="p-3 rounded-2xl bg-orange-100 text-[#FF6B35] shrink-0">
+          <div className="p-3 rounded-2xl bg-brand-100 text-primary shrink-0">
             <Package className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
           <div className="min-w-0 text-center sm:text-left">
@@ -254,7 +254,7 @@ export default function StockManager({ user, ingredients, setIngredients, transa
                   id="edit-category"
                   value={editingIngredient.category}
                   onChange={(e) => setEditingIngredient({...editingIngredient, category: e.target.value})}
-                  className="sm:col-span-3 h-10 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF6B35] font-medium"
+                  className="sm:col-span-3 h-10 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium"
                 >
                   {settings?.kategori_hpp.map(cat => (
                     <option key={cat} value={cat}>{cat}</option>
@@ -308,7 +308,7 @@ export default function StockManager({ user, ingredients, setIngredients, transa
               {/* Riwayat Stok Section */}
               <div className="mt-4 pt-4 border-t border-gray-100">
                 <div className="flex items-center gap-2 mb-3">
-                  <History className="w-4 h-4 text-[#FF6B35]" />
+                  <History className="w-4 h-4 text-primary" />
                   <h3 className="text-sm font-black text-[#1A1A2E]">Riwayat Stok Masuk & Keluar</h3>
                 </div>
                 <ScrollArea className="h-[200px] pr-4">
@@ -421,7 +421,7 @@ export default function StockManager({ user, ingredients, setIngredients, transa
         <DialogContent className="sm:max-w-[500px] rounded-3xl max-h-[80vh] flex flex-col p-0 overflow-hidden">
           <DialogHeader className="p-6 pb-2">
             <DialogTitle className="text-xl font-black flex items-center gap-2">
-              <History className="w-5 h-5 text-[#FF6B35]" />
+              <History className="w-5 h-5 text-primary" />
               Riwayat Stok: {historyIngredient?.name}
             </DialogTitle>
             <DialogDescription className="font-medium">
@@ -528,17 +528,17 @@ const StockCard: React.FC<{
                 </Badge>
               )}
             </div>
-            <h3 className="text-lg font-black text-[#1A1A2E] group-hover:text-[#FF6B35] transition-colors">{item.name}</h3>
+            <h3 className="text-lg font-black text-[#1A1A2E] group-hover:text-primary transition-colors">{item.name}</h3>
           </div>
           <div className="flex flex-col items-end gap-2">
             <Badge className={cn(
               "font-black text-[10px] border-none",
-              isOut ? "bg-red-100 text-red-600" : isLow ? "bg-orange-100 text-orange-600" : "bg-green-100 text-green-600"
+              isOut ? "bg-red-100 text-red-600" : isLow ? "bg-brand-100 text-primary" : "bg-green-100 text-green-600"
             )}>
               {isOut ? "HABIS" : isLow ? "BELI" : "AMAN"}
             </Badge>
             <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-gray-400 hover:text-[#FF6B35] hover:bg-orange-50" onClick={onViewHistory}>
+              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-gray-400 hover:text-primary hover:bg-brand-50" onClick={onViewHistory}>
                 <History className="w-4 h-4" />
               </Button>
               <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50" onClick={onEdit}>
@@ -561,7 +561,7 @@ const StockCard: React.FC<{
             </div>
             <div className="text-right">
               <p className="text-[10px] font-bold text-gray-400 uppercase">Nilai Stok</p>
-              <p className="text-sm font-black text-orange-500">{formatCurrency(item.currentStock * (item.price || 0), true)}</p>
+              <p className="text-sm font-black text-primary">{formatCurrency(item.currentStock * (item.price || 0), true)}</p>
             </div>
           </div>
 
@@ -569,7 +569,7 @@ const StockCard: React.FC<{
             value={progressValue} 
             className="h-2 bg-gray-100"
             indicatorClassName={cn(
-              isOut ? "bg-red-500" : isLow ? "bg-orange-500" : "bg-green-500"
+              isOut ? "bg-red-500" : isLow ? "bg-primary" : "bg-green-500"
             )}
           />
         </div>

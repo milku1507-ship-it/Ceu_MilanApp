@@ -146,10 +146,34 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 }
 
 /**
- * Sanitizes data for Firestore by removing undefined values
+ * Sanitizes data for Firestore by removing undefined values recursively.
+ * Preserves Firestore special objects like serverTimestamp, increment, etc.
  */
 export function sanitizeData(data: any): any {
-  return JSON.parse(JSON.stringify(data));
+  if (data === null || typeof data !== 'object') {
+    return data;
+  }
+
+  // If it's a Firestore special object (FieldValue, etc.), return as is
+  // These objects typically have a specific internal structure or are not plain objects
+  if (data.constructor && data.constructor.name !== 'Object' && !Array.isArray(data)) {
+    return data;
+  }
+
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeData(item));
+  }
+
+  const sanitized: any = {};
+  for (const key in data) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      const value = data[key];
+      if (value !== undefined) {
+        sanitized[key] = sanitizeData(value);
+      }
+    }
+  }
+  return sanitized;
 }
 
 // Removed testFirestoreConnection to avoid false positive error messages in the UI
