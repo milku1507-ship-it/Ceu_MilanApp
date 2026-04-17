@@ -8,7 +8,7 @@ import {
   Calculator, Save, Plus, Edit2, Trash2, ChevronRight, ArrowLeft, 
   Package, Info, TrendingUp, DollarSign, MoreVertical, Copy
 } from 'lucide-react';
-import { Product, Variant, HppMaterial, Ingredient } from '../types';
+import { Product, Variant, HppMaterial, Ingredient, AdditionalFee } from '../types';
 import { User } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -60,6 +60,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   const [materialToDelete, setMaterialToDelete] = React.useState<{ index: number, material: HppMaterial } | null>(null);
   const [categoryToDelete, setCategoryToDelete] = React.useState<string | null>(null);
   const [editingMaterial, setEditingMaterial] = React.useState<{ material: HppMaterial, index: number } | null>(null);
+  const [productFees, setProductFees] = React.useState<AdditionalFee[]>([]);
 
   const selectedProduct = products.find(p => p.id === selectedProductId);
   const selectedVariant = selectedProduct?.varian.find(v => v.id === selectedVariantId);
@@ -95,6 +96,14 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     };
   }, [view, handleBack, onSetBack]);
 
+  React.useEffect(() => {
+    if (editingProduct) {
+      setProductFees(editingProduct.biaya_lain || []);
+    } else {
+      setProductFees([]);
+    }
+  }, [editingProduct]);
+
   // Product CRUD
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,7 +113,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     const deskripsi = (formData.get('deskripsi') as string) || '';
 
     if (editingProduct) {
-      const updatedProduct = { ...editingProduct, nama, deskripsi };
+      const updatedProduct = { ...editingProduct, nama, deskripsi, biaya_lain: productFees };
       
       // Optimistic update
       setProducts(prev => prev.map(p => p.id === editingProduct.id ? updatedProduct : p));
@@ -130,7 +139,8 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         id,
         nama,
         deskripsi,
-        varian: []
+        varian: [],
+        biaya_lain: productFees
       };
       
       // Optimistic update
@@ -296,7 +306,21 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     toast.success(`Varian '${variant.nama}' diduplikasi`);
   };
 
-  // HPP Detail Handlers
+  // Fee Management
+  const handleAddFee = () => {
+    setProductFees([...productFees, { nama: '', tipe: 'persen', nilai: 0 }]);
+  };
+
+  const handleUpdateFee = (index: number, field: keyof AdditionalFee, value: any) => {
+    const updated = [...productFees];
+    updated[index] = { ...updated[index], [field]: value };
+    setProductFees(updated);
+  };
+
+  const handleRemoveFee = (index: number) => {
+    setProductFees(productFees.filter((_, i) => i !== index));
+  };
+
   const handleMaterialChange = (index: number, field: keyof HppMaterial, value: any) => {
     if (!activeHppVariant) return;
     const newBahan = [...activeHppVariant.bahan];
@@ -911,10 +935,73 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               <Label htmlFor="deskripsi" className="font-bold">Deskripsi (Opsional)</Label>
               <Input id="deskripsi" name="deskripsi" defaultValue={editingProduct?.deskripsi || ''} placeholder="Contoh: Cireng goreng dengan berbagai isian" className="rounded-xl" />
             </div>
-            <DialogFooter className="pt-4">
-              <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold">Batal</Button>} />
-              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold">
-                {isSaving ? 'Menyimpan...' : 'Simpan Produk'}
+
+            <div className="space-y-3 pt-2 border-t border-dashed border-gray-100">
+              <div className="flex items-center justify-between">
+                <Label className="font-bold text-sm">Pajak / Biaya Tambahan</Label>
+                <Button type="button" variant="outline" size="sm" onClick={handleAddFee} className="rounded-xl h-8 gap-1 text-xs border-primary text-primary hover:bg-brand-50">
+                  <Plus className="w-3 h-3" />
+                  Tambah Biaya
+                </Button>
+              </div>
+              
+              <div className="space-y-3 max-h-[200px] overflow-y-auto px-1 custom-scrollbar">
+                {productFees.length === 0 && (
+                  <p className="text-xs text-gray-400 italic text-center py-2">Belum ada biaya tambahan</p>
+                )}
+                {productFees.map((fee, index) => (
+                  <div key={index} className="flex items-center gap-2 bg-gray-50 p-3 rounded-2xl border border-gray-100 group relative">
+                    <div className="flex-1 space-y-2">
+                      <Input 
+                        placeholder="Nama Biaya (Contoh: Admin Shopee)" 
+                        value={fee.nama} 
+                        onChange={(e) => handleUpdateFee(index, 'nama', e.target.value)}
+                        className="h-8 text-xs rounded-lg border-gray-200"
+                        required
+                      />
+                      <div className="flex gap-2">
+                        <select 
+                          value={fee.tipe} 
+                          onChange={(e) => handleUpdateFee(index, 'tipe', e.target.value)}
+                          className="h-8 text-xs rounded-lg border border-gray-200 bg-white px-2 focus:outline-none focus:ring-1 focus:ring-primary w-24"
+                        >
+                          <option value="persen">% Persen</option>
+                          <option value="nominal">Rp Nominal</option>
+                        </select>
+                        <Input 
+                          type="number" 
+                          step="0.01"
+                          placeholder="Nilai" 
+                          value={fee.nilai} 
+                          onChange={(e) => handleUpdateFee(index, 'nilai', parseFloat(e.target.value) || 0)}
+                          className="h-8 text-xs rounded-lg border-gray-200"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <Button 
+                      type="button" 
+                      variant="ghost" 
+                      size="icon" 
+                      onClick={() => handleRemoveFee(index)}
+                      className="h-8 w-8 text-red-400 hover:text-red-500 hover:bg-red-50 rounded-lg shrink-0"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <DialogFooter className="pt-4 flex flex-col-reverse sm:flex-row gap-3">
+              <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold w-full sm:w-auto h-12">Batal</Button>} />
+              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold w-full sm:w-auto h-12 px-8 shadow-lg shadow-brand-100">
+                {isSaving ? (
+                  <span className="flex items-center gap-2">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Menyimpan...
+                  </span>
+                ) : 'Simpan Produk'}
               </Button>
             </DialogFooter>
           </form>
@@ -949,10 +1036,15 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               <Label htmlFor="harga_packing" className="font-bold">Harga Packing / pack</Label>
               <Input id="harga_packing" name="harga_packing" type="number" defaultValue={editingVariant?.harga_packing || 12000} required className="rounded-xl" />
             </div>
-            <DialogFooter className="pt-4">
-              <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold">Batal</Button>} />
-              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold">
-                {isSaving ? 'Menyimpan...' : 'Simpan Varian'}
+            <DialogFooter className="pt-4 flex flex-col-reverse sm:flex-row gap-3">
+              <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold w-full sm:w-auto h-12">Batal</Button>} />
+              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold w-full sm:w-auto h-12 px-8 shadow-lg shadow-brand-100">
+                {isSaving ? (
+                  <span className="flex items-center gap-2">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Menyimpan...
+                  </span>
+                ) : 'Simpan Varian'}
               </Button>
             </DialogFooter>
           </form>
@@ -1000,10 +1092,15 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               <Label htmlFor="mat-harga" className="font-bold">Harga per Satuan (Rp)</Label>
               <Input id="mat-harga" name="harga" type="number" step="0.01" defaultValue={editingMaterial?.material.harga || 0} required className="rounded-xl" />
             </div>
-            <DialogFooter className="pt-4 flex gap-2">
-              <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold flex-1">Batal</Button>} />
-              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold flex-1">
-                {isSaving ? 'Menyimpan...' : 'Simpan'}
+            <DialogFooter className="pt-4 flex flex-col-reverse sm:flex-row gap-3">
+              <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold w-full sm:w-auto h-12">Batal</Button>} />
+              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold w-full sm:w-auto h-12 px-8 shadow-lg shadow-brand-100">
+                {isSaving ? (
+                  <span className="flex items-center gap-2">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Menyimpan...
+                  </span>
+                ) : 'Simpan Bahan'}
               </Button>
             </DialogFooter>
           </form>
@@ -1017,10 +1114,10 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               Bahan ini juga akan dihapus dari Stok. Lanjutkan?
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="flex gap-2 pt-4">
-            <DialogClose render={<Button variant="outline" className="rounded-2xl font-bold h-12 flex-1">Batal</Button>} />
-            <Button onClick={confirmRemoveMaterial} className="bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl h-12 flex-1">
-              Hapus
+          <DialogFooter className="pt-4 flex flex-col-reverse sm:flex-row gap-3">
+            <DialogClose render={<Button variant="outline" className="rounded-xl font-bold h-12 w-full sm:w-auto">Batal</Button>} />
+            <Button onClick={confirmRemoveMaterial} className="bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl h-12 w-full sm:w-auto px-8">
+              Hapus Bahan
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1033,10 +1130,10 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
               Semua bahan dalam kelompok "{categoryToDelete}" juga akan dihapus dari Stok. Lanjutkan?
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="flex gap-2 pt-4">
-            <DialogClose render={<Button variant="outline" className="rounded-2xl font-bold h-12 flex-1">Batal</Button>} />
-            <Button onClick={confirmRemoveCategory} className="bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl h-12 flex-1">
-              Hapus
+          <DialogFooter className="pt-4 flex flex-col-reverse sm:flex-row gap-3">
+            <DialogClose render={<Button variant="outline" className="rounded-xl font-bold h-12 w-full sm:w-auto">Batal</Button>} />
+            <Button onClick={confirmRemoveCategory} className="bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl h-12 w-full sm:w-auto px-8">
+              Hapus Kelompok
             </Button>
           </DialogFooter>
         </DialogContent>

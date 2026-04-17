@@ -30,11 +30,18 @@ export type Variant = {
   bahan: HppMaterial[];
 };
 
+export type AdditionalFee = {
+  nama: string;
+  tipe: 'persen' | 'nominal';
+  nilai: number;
+};
+
 export type Product = {
   id: string;
   nama: string;
   deskripsi?: string;
   varian: Variant[];
+  biaya_lain?: AdditionalFee[];
 };
 
 export type PenjualanVarian = {

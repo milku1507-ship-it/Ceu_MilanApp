@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Search, Filter, ArrowUpRight, ArrowDownLeft, Trash2, Calendar, ShoppingBag, CreditCard, ChevronDown, ChevronUp, Package } from 'lucide-react';
-import { Transaction, Product, PenjualanDetail, Variant, Ingredient } from '../types';
+import { Transaction, Product, PenjualanDetail, Variant, Ingredient, AdditionalFee } from '../types';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -182,18 +182,45 @@ export default function TransactionManager({ user, transactions, setTransactions
   React.useEffect(() => {
     if (newTx.kategori === 'Penjualan' && newTx.penjualan_detail) {
       let totalQty = 0;
-      let totalNominal = 0;
+      let subtotal = 0;
+      
+      const involvedProductIds = new Set<string>();
+
       newTx.penjualan_detail.forEach(pd => {
+        involvedProductIds.add(pd.produk_id);
         pd.varian.forEach(v => {
           totalQty += v.qty;
           const product = products.find(p => p.id === pd.produk_id);
           const variant = product?.varian.find(varItem => varItem.id === v.varian_id);
           if (variant) {
-            totalNominal += v.qty * variant.harga_jual;
+            subtotal += v.qty * variant.harga_jual;
           }
         });
       });
-      setNewTx(prev => ({ ...prev, qty_total: totalQty, nominal: totalNominal }));
+
+      // Calculate Fees (once per unique fee name across all involved products)
+      const feesByName = new Map<string, AdditionalFee>();
+      involvedProductIds.forEach(pid => {
+        const product = products.find(p => p.id === pid);
+        if (product && product.biaya_lain) {
+          product.biaya_lain.forEach(fee => {
+            if (!feesByName.has(fee.nama)) {
+              feesByName.set(fee.nama, fee);
+            }
+          });
+        }
+      });
+
+      let totalFees = 0;
+      feesByName.forEach(fee => {
+        if (fee.tipe === 'persen') {
+          totalFees += subtotal * (fee.nilai / 100);
+        } else {
+          totalFees += fee.nilai;
+        }
+      });
+
+      setNewTx(prev => ({ ...prev, qty_total: totalQty, nominal: subtotal + totalFees }));
     }
   }, [newTx.penjualan_detail, newTx.kategori, products]);
 
@@ -319,11 +346,9 @@ export default function TransactionManager({ user, transactions, setTransactions
         });
 
         if (negativeStocks.length > 0) {
-          toast.error(`Stok tidak mencukupi untuk: ${negativeStocks.join(', ')}`, {
-            description: 'Penjualan tidak dapat dicatat karena akan mengakibatkan stok negatif.'
+          toast.warning(`Peringatan: Stok tidak mencukupi untuk ${negativeStocks.join(', ')}`, {
+            description: 'Transaksi tetap dicatat, namun stok akan menjadi negatif.'
           });
-          setIsSaving(false);
-          return;
         }
       }
 
