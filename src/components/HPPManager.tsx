@@ -414,21 +414,84 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     setCategoryToDelete(null);
   };
 
-  const handleSaveMaterial = (e: React.FormEvent) => {
+  const handleSaveMaterial = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingMaterial || !activeHppVariant) return;
     
     setIsSaving(true);
     const formData = new FormData(e.target as HTMLFormElement);
-    const nama = formData.get('nama') as string;
+    const nama = (formData.get('nama') as string).trim();
     const kelompok = formData.get('kelompok') as string;
     const qty = parseFloat(formData.get('qty') as string) || 0;
     const harga = parseFloat(formData.get('harga') as string) || 0;
     const satuan = formData.get('satuan') as string;
 
+    // FIND OR CREATE INGREDIENT IN GLOBAL LIST
+    let ingredientId = editingMaterial.material.ingredientId;
+    
+    // Find by name if ID is missing (legacy)
+    if (!ingredientId) {
+       const existingByNama = ingredients.find(i => i.name.toLowerCase().trim() === nama.toLowerCase().trim());
+       if (existingByNama) ingredientId = existingByNama.id;
+    }
+
+    if (!ingredientId) {
+       // Truly new ingredient
+       ingredientId = 'ing_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    // Update global ingredients list (Single Source of Truth)
+    const existingIng = ingredients.find(i => i.id === ingredientId);
+    if (existingIng) {
+      const updatedIng = {
+        ...existingIng,
+        name: nama,
+        category: kelompok,
+        price: harga,
+        unit: satuan,
+        fromHpp: true
+      };
+      
+      // Update locally
+      setIngredients(prev => prev.map(i => i.id === ingredientId ? updatedIng : i));
+      
+      // Update Firestore
+      if (user) {
+        try {
+          await setDoc(doc(db, `users/${user.uid}/stok/${ingredientId}`), sanitizeData(updatedIng));
+        } catch (error) {
+           console.error('Failed to sync ingredient to stock:', error);
+        }
+      }
+    } else {
+      // Create new ingredient
+      const newIng: Ingredient = {
+        id: ingredientId,
+        name: nama,
+        category: kelompok,
+        unit: satuan,
+        price: harga,
+        initialStock: 0,
+        currentStock: 0,
+        minStock: 0,
+        fromHpp: true
+      };
+      
+      setIngredients(prev => [...prev, newIng]);
+      
+       if (user) {
+        try {
+          await setDoc(doc(db, `users/${user.uid}/stok/${ingredientId}`), sanitizeData(newIng));
+        } catch (error) {
+           console.error('Failed to create ingredient in stock:', error);
+        }
+      }
+    }
+
     const newBahan = [...activeHppVariant.bahan];
     newBahan[editingMaterial.index] = { 
       ...newBahan[editingMaterial.index], 
+      ingredientId,
       nama, 
       kelompok, 
       qty, 
@@ -440,7 +503,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     setIsMaterialModalOpen(false);
     setEditingMaterial(null);
     setIsSaving(false);
-    toast.success('Bahan diperbarui ✓');
+    toast.success('Bahan diperbarui & Stok disinkronkan ✓');
   };
   const handleSaveHpp = async () => {
     if (!activeHppVariant || !selectedProductId) return;
@@ -680,49 +743,67 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                           <div className="h-[2px] flex-1 bg-brand-100/50"></div>
                         </div>
                         <div className="grid grid-cols-1 gap-3">
-                          {catMaterials.map((m) => (
-                            <div key={m.originalIdx} className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm group hover:border-brand-200 transition-all">
-                              <div className="flex justify-between items-start">
-                                <div className="min-w-0 flex-1">
-                                  <h4 className="font-black text-[#1A1A2E] truncate pr-2">{m.nama}</h4>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <Badge className="bg-brand-50 text-primary border-none text-[9px] font-bold uppercase">
-                                      {m.kelompok}
-                                    </Badge>
-                                    <span className="text-[10px] font-bold text-gray-400">
-                                      {formatSmartUnit(m.qty, m.satuan)}
-                                    </span>
+                          {catMaterials.map((m) => {
+                            const ingredient = ingredients.find(i => i.id === m.ingredientId);
+                            const displayName = ingredient ? ingredient.name : m.nama;
+                            const displayCat = ingredient ? ingredient.category : m.kelompok;
+                            const displayPrice = ingredient ? ingredient.price : m.harga;
+                            const displayUnit = ingredient ? ingredient.unit : m.satuan;
+                            
+                            return (
+                              <div key={m.originalIdx} className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm group hover:border-brand-200 transition-all">
+                                <div className="flex justify-between items-start">
+                                  <div className="min-w-0 flex-1">
+                                    <h4 className="font-black text-[#1A1A2E] truncate pr-2">{displayName}</h4>
+                                    <div className="flex items-center gap-2 mt-1">
+                                      <Badge className="bg-brand-50 text-primary border-none text-[9px] font-bold uppercase">
+                                        {displayCat}
+                                      </Badge>
+                                      <span className="text-[10px] font-bold text-gray-400">
+                                        {formatSmartUnit(m.qty, displayUnit)}
+                                      </span>
+                                    </div>
                                   </div>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <p className="text-sm font-black text-primary">
-                                    {formatCurrency(m.qty * m.harga, true)}
-                                  </p>
-                                  <div className="flex gap-1 mt-2 justify-end">
-                                    <Button 
-                                      variant="ghost" 
-                                      size="icon" 
-                                      className="h-7 w-7 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50"
-                                      onClick={() => {
-                                        setEditingMaterial({ material: m, index: m.originalIdx });
-                                        setIsMaterialModalOpen(true);
-                                      }}
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </Button>
-                                    <Button 
-                                      variant="ghost" 
-                                      size="icon" 
-                                      className="h-7 w-7 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50"
-                                      onClick={() => handleRemoveMaterial(m.originalIdx)}
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </Button>
+                                  <div className="text-right shrink-0">
+                                    <p className="text-sm font-black text-primary">
+                                      {formatCurrency(m.qty * displayPrice, true)}
+                                    </p>
+                                    <div className="flex gap-1 mt-2 justify-end">
+                                      <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className="h-7 w-7 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50"
+                                        onClick={() => {
+                                          setEditingMaterial({ 
+                                            variantId: activeHppVariant.id, 
+                                            index: m.originalIdx, 
+                                            material: {
+                                              ...m,
+                                              nama: displayName,
+                                              kelompok: displayCat,
+                                              harga: displayPrice,
+                                              satuan: displayUnit
+                                            } 
+                                          });
+                                          setIsMaterialModalOpen(true);
+                                        }}
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </Button>
+                                      <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className="h-7 w-7 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                        onClick={() => handleRemoveMaterial(m.originalIdx)}
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </Button>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     );
@@ -883,7 +964,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             <DialogTitle className="text-xl font-black">Edit Bahan Baku</DialogTitle>
             <DialogDescription>Sesuaikan rincian bahan untuk perhitungan HPP.</DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleSaveMaterial} className="space-y-4 py-4">
+          <form key={editingMaterial ? `mat-${editingMaterial.variantId}-${editingMaterial.index}` : 'new-material'} onSubmit={handleSaveMaterial} className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="mat-nama" className="font-bold">Nama Bahan</Label>
               <Input id="mat-nama" name="nama" defaultValue={editingMaterial?.material.nama || ''} placeholder="Contoh: Tepung Tapioka" required className="rounded-xl" />

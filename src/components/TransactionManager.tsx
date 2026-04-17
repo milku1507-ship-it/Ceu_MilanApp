@@ -19,6 +19,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+
 import { auth, db, doc, setDoc, deleteDoc, writeBatch, OperationType, handleFirestoreError, serverTimestamp, increment, sanitizeData } from '../lib/firebase';
 import { User } from 'firebase/auth';
 import { useSettings } from '../SettingsContext';
@@ -48,9 +63,45 @@ const CATEGORIES = [
 ];
 
 export default function TransactionManager({ user, transactions, setTransactions, products, ingredients, setIngredients, onSuccess }: TransactionManagerProps) {
+  const { settings } = useSettings();
+  const dateInputRef = React.useRef<HTMLInputElement>(null);
   const [searchTerm, setSearchTerm] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState('Semua');
   
+  const [isMaterialPopoverOpen, setIsMaterialPopoverOpen] = React.useState(false);
+
+  // Dynamic Categories from Settings
+  const dynamicCategories = React.useMemo(() => {
+    const base = [
+      { name: 'Penjualan', type: 'Pemasukan' as const, fixed: true },
+      { name: 'Saldo sisa', type: 'Pemasukan' as const, fixed: true },
+    ];
+    
+    // Add categories from settings (HPP groups like Bahan Baku, Packing, Overhead, etc.)
+    const hppGroups = settings?.kategori_hpp || [];
+    const formattedGroups = hppGroups.map(group => ({
+      name: group,
+      type: 'Pengeluaran' as const,
+      fixed: false
+    }));
+
+    const otherFinancial = [
+      { name: 'Gaji', type: 'Pengeluaran' as const, fixed: true },
+      { name: 'Operasional', type: 'Pengeluaran' as const, fixed: true },
+      { name: 'Tabungan', type: 'Pengeluaran' as const, fixed: true },
+      { name: 'Biaya Iklan', type: 'Pengeluaran' as const, fixed: true },
+      { name: 'Lainnya', type: 'Pengeluaran' as const, fixed: false },
+    ];
+
+    // Combine and unique by name to prevent duplicates
+    const combined = [...base, ...formattedGroups, ...otherFinancial];
+    const uniqueMap = new Map();
+    combined.forEach(c => {
+      if (!uniqueMap.has(c.name)) uniqueMap.set(c.name, c);
+    });
+    return Array.from(uniqueMap.values());
+  }, [settings]);
+
   const [txToDelete, setTxToDelete] = React.useState<Transaction | null>(null);
   const [bulkToDelete, setBulkToDelete] = React.useState<string[] | null>(null);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = React.useState(false);
@@ -97,7 +148,7 @@ export default function TransactionManager({ user, transactions, setTransactions
 
   // Handle category change and auto-type
   const handleCategoryChange = (catName: string) => {
-    const cat = CATEGORIES.find(c => c.name === catName);
+    const cat = dynamicCategories.find(c => c.name === catName);
     if (cat) {
       setNewTx(prev => ({
         ...prev,
@@ -114,7 +165,8 @@ export default function TransactionManager({ user, transactions, setTransactions
 
   // Auto-nominal for Bahan Baku and Packing
   React.useEffect(() => {
-    if ((newTx.kategori === 'Bahan Baku' || newTx.kategori === 'Packing') && selectedMaterialId) {
+    const isHppCategory = settings?.kategori_hpp.includes(newTx.kategori || '');
+    if (isHppCategory && selectedMaterialId) {
       const material = ingredients.find(i => i.id === selectedMaterialId);
       if (material) {
         setNewTx(prev => ({
@@ -124,7 +176,7 @@ export default function TransactionManager({ user, transactions, setTransactions
         }));
       }
     }
-  }, [selectedMaterialId, newTx.qty_beli, newTx.kategori, ingredients]);
+  }, [selectedMaterialId, newTx.qty_beli, newTx.kategori, ingredients, settings]);
 
   // Calculate total qty and estimated revenue from penjualan_detail
   React.useEffect(() => {
@@ -201,19 +253,21 @@ export default function TransactionManager({ user, transactions, setTransactions
       const snapshot: { ingredientId: string; stockBefore: number; delta: number }[] = [];
       const stockUpdates: { id: string; delta: number }[] = [];
 
-      // Create a map for faster lookup
-      const ingredientMap = new Map(ingredients.map(i => [i.name.toLowerCase().trim(), i]));
+      // Create a map for faster lookup by ID
+      const ingredientIdMap = new Map(ingredients.map(i => [i.id, i]));
 
-      if (newTx.kategori === 'Bahan Baku' || newTx.kategori === 'Packing') {
+      if (newTx.jenis === 'Pengeluaran') {
+        // pengeluaran -> tambah stok
         if (selectedMaterialId) {
-          const material = ingredients.find(i => i.id === selectedMaterialId);
+          const material = ingredientIdMap.get(selectedMaterialId);
           if (material) {
             const delta = newTx.qty_beli || 0;
             snapshot.push({ ingredientId: material.id, stockBefore: material.currentStock || 0, delta });
             stockUpdates.push({ id: material.id, delta });
           }
         }
-      } else if (newTx.kategori === 'Penjualan' && newTx.penjualan_detail) {
+      } else if (newTx.jenis === 'Pemasukan' && newTx.kategori === 'Penjualan' && newTx.penjualan_detail) {
+        // pemasukan -> kurangi stok berdasarkan HPP
         newTx.penjualan_detail.forEach(pd => {
           const product = products.find(p => p.id === pd.produk_id);
           if (product) {
@@ -222,24 +276,30 @@ export default function TransactionManager({ user, transactions, setTransactions
                 const variant = product.varian.find(v => v.id === pv.varian_id);
                 if (variant && variant.bahan) {
                   variant.bahan.forEach(bahan => {
-                    if (!bahan.nama) return;
-                    const ingredient = ingredientMap.get(bahan.nama.toLowerCase().trim());
+                    // Always prefer ingredientId if available, fallback to name-based lookup for legacy data
+                    let ingredient = bahan.ingredientId ? ingredientIdMap.get(bahan.ingredientId) : null;
+                    
+                    if (!ingredient && bahan.nama) {
+                      const normalizedName = bahan.nama.toLowerCase().trim();
+                      ingredient = ingredients.find(i => i.name.toLowerCase().trim() === normalizedName);
+                    }
+
                     if (ingredient) {
                       const totalUsage = (bahan.qty || 0) * pv.qty;
                       const delta = -totalUsage;
                       
-                      const existingSnapshot = snapshot.find(s => s.ingredientId === ingredient.id);
+                      const existingSnapshot = snapshot.find(s => s.ingredientId === ingredient!.id);
                       if (existingSnapshot) {
                         existingSnapshot.delta += delta;
                       } else {
-                        snapshot.push({ ingredientId: ingredient.id, stockBefore: ingredient.currentStock || 0, delta });
+                        snapshot.push({ ingredientId: ingredient!.id, stockBefore: ingredient!.currentStock || 0, delta });
                       }
                       
-                      const existingUpdate = stockUpdates.find(u => u.id === ingredient.id);
+                      const existingUpdate = stockUpdates.find(u => u.id === ingredient!.id);
                       if (existingUpdate) {
                         existingUpdate.delta += delta;
                       } else {
-                        stockUpdates.push({ id: ingredient.id, delta });
+                        stockUpdates.push({ id: ingredient!.id, delta });
                       }
                     }
                   });
@@ -249,6 +309,22 @@ export default function TransactionManager({ user, transactions, setTransactions
           }
         });
 
+        // Validasi stok agar tidak minus
+        const negativeStocks: string[] = [];
+        stockUpdates.forEach(update => {
+          const ingredient = ingredientIdMap.get(update.id);
+          if (ingredient && (ingredient.currentStock + update.delta) < 0) {
+            negativeStocks.push(ingredient.name);
+          }
+        });
+
+        if (negativeStocks.length > 0) {
+          toast.error(`Stok tidak mencukupi untuk: ${negativeStocks.join(', ')}`, {
+            description: 'Penjualan tidak dapat dicatat karena akan mengakibatkan stok negatif.'
+          });
+          setIsSaving(false);
+          return;
+        }
       }
 
       const txId = Math.random().toString(36).substr(2, 9);
@@ -275,7 +351,7 @@ export default function TransactionManager({ user, transactions, setTransactions
       }
 
       if (user) {
-        // Optimistic update
+        // Update local state IMMEDIATELY (Optimistic Update)
         if (stockUpdates.length > 0) {
           setIngredients(prev => prev.map(ing => {
             const update = stockUpdates.find(u => u.id === ing.id);
@@ -299,20 +375,12 @@ export default function TransactionManager({ user, transactions, setTransactions
           });
         });
 
-        console.log('Committing batch...', { txId, stockUpdatesCount: stockUpdates.length });
+        // Wait for server to confirm before continuing (to fulfill "Loading state" requirement)
+        await batch.commit();
         
-        // Update UI immediately
         setIsSaving(false);
         toast.success('Transaksi berhasil dicatat! ✓');
         if (onSuccess) onSuccess();
-        
-        // Commit in background
-        batch.commit().then(() => {
-          console.log('Batch committed successfully');
-        }).catch(error => {
-          console.error('Batch commit failed:', error);
-          toast.error('Gagal sinkronisasi transaksi ke cloud.', { description: 'Data mungkin tidak tersimpan permanen.' });
-        });
       } else {
         // Update ingredients state locally
         if (stockUpdates.length > 0) {
@@ -329,12 +397,15 @@ export default function TransactionManager({ user, transactions, setTransactions
         if (onSuccess) onSuccess();
       }
 
+      // Update local state and reset form
       setSelectedMaterialId('');
       setSelectedProductIds([]);
       setSelectedTxIds([]);
       setIsRange(false);
+      
+      const today = new Date().toISOString().split('T')[0];
       setNewTx({
-        tanggal: new Date().toISOString().split('T')[0],
+        tanggal: today,
         tanggal_akhir: null,
         jenis: 'Pemasukan',
         kategori: 'Penjualan',
@@ -344,6 +415,13 @@ export default function TransactionManager({ user, transactions, setTransactions
         qty_beli: 0,
         penjualan_detail: []
       });
+
+      // Refocus to date input for next entry
+      setTimeout(() => {
+        dateInputRef.current?.focus();
+      }, 100);
+
+      if (onSuccess) onSuccess();
     } catch (error) {
       console.error('Add Transaction Error:', error);
       const errMessage = error instanceof Error ? error.message : String(error);
@@ -546,8 +624,9 @@ export default function TransactionManager({ user, transactions, setTransactions
       </div>
 
       {/* Wallet Balance Summary */}
-      <div className="wallet-gradient rounded-[2rem] md:rounded-[2.5rem] p-5 md:p-8 text-white shadow-xl shadow-blue-100 flex flex-col md:flex-row justify-between items-center gap-6">
-        <div className="flex items-center gap-4 w-full md:w-auto">
+      <div className="wallet-gradient rounded-[2rem] md:rounded-[2.5rem] p-5 md:p-8 text-white shadow-2xl shadow-red-200 border-b-4 border-red-800/10 flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden group">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl group-hover:bg-white/20 transition-colors" />
+        <div className="flex items-center gap-4 w-full md:w-auto relative z-10">
           <div className="w-12 h-12 md:w-14 md:h-14 rounded-2xl glass-card flex items-center justify-center shrink-0">
             <CreditCard className="w-6 h-6 md:w-7 md:h-7" />
           </div>
@@ -597,6 +676,7 @@ export default function TransactionManager({ user, transactions, setTransactions
               </div>
               <div className={cn("grid gap-2", isRange ? "grid-cols-2" : "grid-cols-1")}>
                 <Input 
+                  ref={dateInputRef}
                   type="date" 
                   value={newTx.tanggal}
                   onChange={(e) => setNewTx({...newTx, tanggal: e.target.value})}
@@ -624,7 +704,7 @@ export default function TransactionManager({ user, transactions, setTransactions
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl">
-                    {CATEGORIES.map(cat => (
+                    {dynamicCategories.map(cat => (
                       <SelectItem key={cat.name} value={cat.name}>{cat.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -635,7 +715,7 @@ export default function TransactionManager({ user, transactions, setTransactions
                 <Select 
                   value={newTx.jenis} 
                   onValueChange={(val: any) => setNewTx({...newTx, jenis: val})}
-                  disabled={CATEGORIES.find(c => c.name === newTx.kategori)?.fixed}
+                  disabled={dynamicCategories.find(c => c.name === newTx.kategori)?.fixed}
                 >
                   <SelectTrigger className="rounded-xl border-gray-100 font-bold">
                     <SelectValue />
@@ -706,30 +786,69 @@ export default function TransactionManager({ user, transactions, setTransactions
               </div>
             )}
 
-            {(newTx.kategori === 'Bahan Baku' || newTx.kategori === 'Packing') && (
+            {settings?.kategori_hpp.includes(newTx.kategori || '') && (
               <div className="space-y-4 pt-2 border-t border-dashed border-gray-100">
                 <div className="space-y-2">
-                  <Label className="text-xs font-bold text-gray-400 uppercase">Pilih Bahan</Label>
-                  <Select 
-                    value={selectedMaterialId} 
-                    onValueChange={setSelectedMaterialId}
-                  >
-                    <SelectTrigger className="rounded-xl border-gray-100 font-bold">
-                      <SelectValue placeholder="Pilih bahan..." />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl">
-                      {ingredients
-                        .filter(i => {
-                          if (newTx.kategori === 'Packing') return i.category === 'Packing';
-                          if (newTx.kategori === 'Bahan Baku') return i.category === 'Kulit Cireng' || i.category === 'Bahan Isian';
-                          return true;
-                        })
-                        .map(i => (
-                          <SelectItem key={i.id} value={i.id}>{i.name} ({i.unit})</SelectItem>
-                        ))
+                  <Label className="text-xs font-bold text-gray-400 uppercase">Pilih Bahan Baku / Packing</Label>
+                  <Popover open={isMaterialPopoverOpen} onOpenChange={setIsMaterialPopoverOpen}>
+                    <PopoverTrigger 
+                      render={
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={isMaterialPopoverOpen}
+                          className="w-full justify-between rounded-xl border-gray-100 font-bold h-10 px-3 overflow-hidden"
+                        />
                       }
-                    </SelectContent>
-                  </Select>
+                    >
+                      {selectedMaterialId
+                        ? ingredients.find((i) => i.id === selectedMaterialId)?.name
+                        : "Cari bahan..."}
+                      <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0 rounded-xl shadow-2xl border-none z-50" align="start" sideOffset={5}>
+                      <Command className="rounded-xl">
+                        <CommandInput placeholder="Ketik nama bahan..." className="h-9" />
+                        <CommandList>
+                          <CommandEmpty>Bahan tidak ditemukan.</CommandEmpty>
+                          <CommandGroup>
+                            {ingredients
+                              .filter(i => {
+                                // Dynamic filtering based on category
+                                const txCat = newTx.kategori || '';
+                                const ingCat = i.category || '';
+                                if (txCat === 'Packing') return ingCat === 'Packing';
+                                if (txCat === 'Bahan Baku') return ingCat === 'Kulit Cireng' || ingCat === 'Bahan Isian';
+                                return ingCat.toLowerCase().trim() === txCat.toLowerCase().trim();
+                              })
+                              .map((i) => (
+                                <CommandItem
+                                  key={i.id}
+                                  value={i.name}
+                                  onSelect={() => {
+                                    setSelectedMaterialId(i.id);
+                                    // Auto-fill logic
+                                    setNewTx(prev => ({
+                                      ...prev,
+                                      keterangan: `Beli ${i.name}`,
+                                      nominal: (prev.qty_beli || 1) * i.price,
+                                      qty_beli: prev.qty_beli || 1
+                                    }));
+                                    setIsMaterialPopoverOpen(false);
+                                  }}
+                                  className="font-medium"
+                                >
+                                  {i.name}
+                                  <Badge variant="outline" className="ml-2 text-[8px] border-none bg-brand-50 text-primary">
+                                    {i.unit}
+                                  </Badge>
+                                </CommandItem>
+                              ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs font-bold text-gray-400 uppercase">Jumlah Beli</Label>
@@ -738,13 +857,26 @@ export default function TransactionManager({ user, transactions, setTransactions
                       type="number" 
                       placeholder="0" 
                       value={newTx.qty_beli || ''}
-                      onChange={(e) => setNewTx({...newTx, qty_beli: Number(e.target.value)})}
+                      onChange={(e) => {
+                        const qty = Number(e.target.value);
+                        const material = ingredients.find(m => m.id === selectedMaterialId);
+                        setNewTx(prev => ({
+                          ...prev,
+                          qty_beli: qty,
+                          nominal: material ? qty * material.price : prev.nominal
+                        }));
+                      }}
                       className="rounded-xl border-gray-100"
                     />
                     <span className="text-xs font-bold text-gray-400">
                       {ingredients.find(i => i.id === selectedMaterialId)?.unit || ''}
                     </span>
                   </div>
+                  {selectedMaterialId && (
+                    <p className="text-[10px] font-bold text-gray-400 mt-1">
+                      Konversi: {formatSmartUnit(newTx.qty_beli || 0, ingredients.find(i => i.id === selectedMaterialId)?.unit || '')}
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -782,7 +914,7 @@ export default function TransactionManager({ user, transactions, setTransactions
                 className="rounded-xl border-gray-100 font-black text-lg"
               />
               <p className="text-[10px] text-gray-400 italic">
-                {newTx.kategori === 'Penjualan' || newTx.kategori === 'Bahan Baku' || newTx.kategori === 'Packing' 
+                {newTx.kategori === 'Penjualan' || settings?.kategori_hpp.includes(newTx.kategori || '')
                   ? '*Nominal terhitung otomatis, namun tetap bisa Anda ubah manual' 
                   : '*Masukkan nominal transaksi'}
               </p>
@@ -863,7 +995,7 @@ export default function TransactionManager({ user, transactions, setTransactions
                         />
                       </div>
                       <div className={cn(
-                        "p-2.5 rounded-xl shrink-0",
+                        "p-2.5 rounded-2xl shrink-0 transition-transform group-hover:scale-110 duration-300",
                         t.jenis === 'Pemasukan' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-500"
                       )}>
                         {t.jenis === 'Pemasukan' ? <ArrowUpRight className="w-5 h-5" /> : <ArrowDownLeft className="w-5 h-5" />}
@@ -889,6 +1021,15 @@ export default function TransactionManager({ user, transactions, setTransactions
                         {t.jenis === 'Pemasukan' ? '+' : '-'} Rp{formatCompactNumber(t.nominal)}
                       </p>
                       {t.qty_total > 0 && <p className="text-[10px] font-bold text-gray-400 mt-1">{t.qty_total} pcs terjual</p>}
+                      {t.qty_beli > 0 && (
+                        <p className="text-[10px] font-bold text-gray-400 mt-1">
+                          Ref: {(() => {
+                            const snapshot = t.stockSnapshot?.[0];
+                            const ingredient = snapshot ? ingredients.find(i => i.id === snapshot.ingredientId) : ingredients.find(i => i.name === t.keterangan.replace('Beli ', ''));
+                            return formatSmartUnit(t.qty_beli, ingredient?.unit || 'gram');
+                          })()}
+                        </p>
+                      )}
                       <div className="mt-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button 
                           variant="ghost" 

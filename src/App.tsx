@@ -193,18 +193,9 @@ function AppContent() {
     }
   }, [user, ingredients.length, transactions.length, storeSettings.onboardingCompleted]);
 
-  // Auto-seed data if user just logged in and has no data (requested by user)
-  React.useEffect(() => {
-    // Only attempt if we are sure we are logged in, auth is ready, and cloud sync (initial fetch) is done
-    if (user && isAuthReady && !isCloudSyncing) {
-      // If after syncing, both ingredients and transactions are still empty, and onboarding not done
-      if (ingredients.length === 0 && transactions.length === 0 && !storeSettings.onboardingCompleted) {
-        console.log('Account is empty, seeding sample data...');
-        seedCloudData();
-      }
-    }
-  }, [user, isAuthReady, isCloudSyncing, ingredients.length, transactions.length, storeSettings.onboardingCompleted]);
-
+  // Removed auto-seed logic because it interferes with users who want a clean account.
+  // The showWelcome card in Dashboard already provides buttons for seeding.
+  
   // Data Persistence (Write to Firestore)
   const updateStoreSettings = async (newSettings: StoreSettings) => {
     if (!user) return;
@@ -330,63 +321,94 @@ function AppContent() {
   const syncHppToStock = React.useCallback(async () => {
     if (!user) return;
     try {
-      const allMaterials = products.flatMap(p => p.varian.flatMap(v => v.bahan || []));
-      const uniqueMaterials = Array.from(new Map(allMaterials.map(m => [m.nama.toLowerCase().trim(), m])).values()) as any[];
+      // Filter out empty materials. Materials in HPP are stored in products[].varian[].bahan[]
+      const allMaterials = products.flatMap(p => 
+        (p.varian || []).flatMap(v => (v.bahan || []))
+      ).filter(m => m && m.nama && m.nama.trim());
+
+      // Use a map to track unique materials by normalized name to prevent duplicates
+      const materialMap = new Map();
+      allMaterials.forEach(m => {
+        const normalizedName = m.nama.toLowerCase().trim();
+        if (!materialMap.has(normalizedName)) {
+          materialMap.set(normalizedName, m);
+        }
+      });
+
+      const uniqueMaterials = Array.from(materialMap.values());
       
-      // Safer ID generation for non-ASCII characters
       const generateId = (name: string) => {
         const cleanName = name.toLowerCase().trim();
         try {
-          // Use a simple hash or safe base64
           return 'ing_' + btoa(unescape(encodeURIComponent(cleanName))).substring(0, 12).replace(/[+/=]/g, '');
         } catch (e) {
-          // Fallback if btoa fails
           return 'ing_' + cleanName.replace(/[^a-z0-9]/g, '').substring(0, 12);
         }
       };
 
       const validMaterialIds = new Set(uniqueMaterials.map(m => generateId(m.nama)));
-
       const batch = writeBatch(db);
       let hasChanges = false;
 
       // 1. Sync/Add from HPP to Stock
+      const activeIds = new Set<string>();
       for (const m of uniqueMaterials) {
-        if (!m.nama || !m.nama.trim()) continue;
+        // Normalize category name for consistency
+        let mKelompok = m.kelompok || 'Lainnya';
+        if (mKelompok === 'Kulit') mKelompok = 'Kulit Cireng';
+        if (mKelompok === 'Isian') mKelompok = 'Bahan Isian';
+
+        // Try to find by ID first, then by name to merge existing items
+        let stockId = m.ingredientId;
+        if (!stockId) {
+          const normalizedName = m.nama.toLowerCase().trim();
+          const existingByName = ingredients.find(i => i.name.toLowerCase().trim() === normalizedName);
+          stockId = existingByName ? existingByName.id : generateId(m.nama);
+        }
         
-        const stockId = generateId(m.nama);
+        activeIds.add(stockId);
+        
         const stockRef = doc(db, `users/${user.uid}/stok/${stockId}`);
-        
         const existingIng = ingredients.find(i => i.id === stockId);
         
         if (existingIng) {
-          if (existingIng.category !== m.kelompok || existingIng.price !== m.harga || existingIng.unit !== m.satuan || existingIng.name !== m.nama) {
+          // Check if core data has changed to avoid unnecessary updates
+          const hasDataChanged = 
+            existingIng.category !== mKelompok || 
+            existingIng.price !== m.harga || 
+            existingIng.unit !== m.satuan || 
+            existingIng.name !== m.nama ||
+            !existingIng.fromHpp;
+
+          if (hasDataChanged) {
             batch.update(stockRef, sanitizeData({
-              name: m.nama || '',
-              category: m.kelompok || 'Lainnya',
+              name: m.nama,
+              category: mKelompok,
               price: Number(m.harga) || 0,
-              unit: m.satuan || 'gram'
+              unit: m.satuan || 'gram',
+              fromHpp: true // Ensure it's marked as fromHpp
             }));
             hasChanges = true;
           }
         } else {
-          batch.set(stockRef, {
+          // New ingredient discovered in HPP
+          batch.set(stockRef, sanitizeData({
             id: stockId,
-            name: m.nama || '',
-            category: m.kelompok || 'Lainnya',
+            name: m.nama,
+            category: mKelompok,
             unit: m.satuan || 'gram',
             price: Number(m.harga) || 0,
             initialStock: 0,
             currentStock: 0,
             minStock: 0,
             fromHpp: true
-          });
+          }));
           hasChanges = true;
         }
       }
 
-      // 2. Automatic Cleanup
-      const orphanedIngredients = ingredients.filter(i => i.fromHpp && !validMaterialIds.has(i.id));
+      // 2. Automatic Cleanup: Removed materials from HPP should be removed from Stock if marked 'fromHpp'
+      const orphanedIngredients = ingredients.filter(i => i.fromHpp && !activeIds.has(i.id));
       if (orphanedIngredients.length > 0) {
         orphanedIngredients.forEach(i => {
           batch.delete(doc(db, `users/${user.uid}/stok/${i.id}`));
@@ -395,9 +417,8 @@ function AppContent() {
       }
       
       if (hasChanges) {
-        console.log('Syncing HPP to Stock...');
         await batch.commit();
-        console.log('Sync HPP to Stock completed');
+        console.log('Sync HPP to Stock completed successfully');
       }
     } catch (error) {
       console.warn('Sync HPP to Stock failed:', error);
@@ -414,19 +435,25 @@ function AppContent() {
 
   const deleteFromStock = React.useCallback(async (materialName: string) => {
     if (!user || !materialName) return;
-    const cleanName = materialName.toLowerCase().trim();
-    let stockId = '';
-    try {
-      stockId = 'ing_' + btoa(unescape(encodeURIComponent(cleanName))).substring(0, 12).replace(/[+/=]/g, '');
-    } catch (e) {
-      stockId = 'ing_' + cleanName.replace(/[^a-z0-9]/g, '').substring(0, 12);
+    
+    // Find the ingredient by name in the local state first to get its actual ID
+    const normalizedName = materialName.toLowerCase().trim();
+    const existingIng = ingredients.find(i => i.name.toLowerCase().trim() === normalizedName);
+    
+    if (!existingIng) {
+      console.warn(`Material "${materialName}" not found in stock for deletion`);
+      return;
     }
+
     try {
-      await deleteDoc(doc(db, `users/${user.uid}/stok/${stockId}`));
+      await deleteDoc(doc(db, `users/${user.uid}/stok/${existingIng.id}`));
+      // After deletion, the local state will be updated by the onSnapshot listener if the sync is 100% reactive,
+      // but we can also manually filter it out for immediate UI feedback.
+      setIngredients(prev => prev.filter(i => i.id !== existingIng.id));
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/stok/${stockId}`);
+      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/stok/${existingIng.id}`);
     }
-  }, [user]);
+  }, [user, ingredients]);
 
   const handleResetStockQty = () => {
     try {
@@ -541,7 +568,7 @@ function AppContent() {
           products={products} 
           ingredients={ingredients} 
           setIngredients={setIngredients} 
-          onSuccess={() => handleTabChange('dashboard')}
+          onSuccess={() => {}} 
         />;
       case 'reports':
         return <FinancialReport transactions={transactions} products={products} />;

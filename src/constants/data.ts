@@ -5,13 +5,13 @@ const KULIT_MATERIALS: HppMaterial[] = [
   { nama: 'Tapioka', satuan: 'gram', qty: 2500, harga: 10, kelompok: 'Kulit' },
   { nama: 'Terigu', satuan: 'gram', qty: 150, harga: 10, kelompok: 'Kulit' },
   { nama: 'Tepung Beras', satuan: 'gram', qty: 45, harga: 16, kelompok: 'Kulit' },
-  { nama: 'Minyak Goreng', satuan: 'gram', qty: 320, harga: 20, kelompok: 'Kulit' },
+  { nama: 'Minyak Goreng', satuan: 'ml', qty: 320, harga: 20, kelompok: 'Kulit' },
   { nama: 'Penyedap', satuan: 'pcs', qty: 6, harga: 500, kelompok: 'Kulit' },
 ];
 
 const ISIAN_MATERIALS: HppMaterial[] = [
   { nama: 'Ayam', satuan: 'gram', qty: 1000, harga: 34, kelompok: 'Isian' },
-  { nama: 'Minyak Goreng', satuan: 'gram', qty: 600, harga: 20, kelompok: 'Isian' },
+  { nama: 'Minyak Goreng', satuan: 'ml', qty: 600, harga: 20, kelompok: 'Isian' },
   { nama: 'Jahe', satuan: 'pcs', qty: 1, harga: 500, kelompok: 'Isian' },
   { nama: 'Cabe Keriting', satuan: 'gram', qty: 50, harga: 120, kelompok: 'Isian' },
   { nama: 'Cabe Jablay', satuan: 'gram', qty: 250, harga: 80, kelompok: 'Isian' },
@@ -148,7 +148,7 @@ export const INITIAL_INGREDIENTS: Ingredient[] = [
   { id: '1', name: 'Tapioka', category: 'Kulit Cireng', unit: 'gram', price: 10, initialStock: 5000, currentStock: 5000, minStock: 1000 },
   { id: '2', name: 'Terigu', category: 'Kulit Cireng', unit: 'gram', price: 10, initialStock: 1000, currentStock: 1000, minStock: 500 },
   { id: '3', name: 'Tepung Beras', category: 'Kulit Cireng', unit: 'gram', price: 16, initialStock: 500, currentStock: 500, minStock: 200 },
-  { id: '4', name: 'Minyak Goreng', category: 'Kulit Cireng', unit: 'gram', price: 20, initialStock: 2000, currentStock: 2000, minStock: 500 },
+  { id: '4', name: 'Minyak Goreng', category: 'Kulit Cireng', unit: 'ml', price: 20, initialStock: 2000, currentStock: 2000, minStock: 500 },
   { id: '5', name: 'Penyedap', category: 'Kulit Cireng', unit: 'pcs', price: 500, initialStock: 50, currentStock: 50, minStock: 10 },
   
   // BAHAN ISIAN
@@ -173,7 +173,7 @@ export const INITIAL_INGREDIENTS: Ingredient[] = [
   { id: '27', name: 'Bubble Wrap', category: 'Packing', unit: 'pcs', price: 650, initialStock: 100, currentStock: 100, minStock: 20 },
 
   // OVERHEAD
-  { id: '28', name: 'Gas', category: 'Overhead', unit: 'unit', price: 10, initialStock: 1000, currentStock: 1000, minStock: 100 },
+  { id: '28', name: 'Gas', category: 'Overhead', unit: 'pcs', price: 10, initialStock: 1000, currentStock: 1000, minStock: 100 },
   { id: '29', name: 'Kertas Nasi', category: 'Overhead', unit: 'unit', price: 2, initialStock: 1000, currentStock: 1000, minStock: 100 },
   { id: '30', name: 'Sabun Cuci Piring', category: 'Overhead', unit: 'unit', price: 20, initialStock: 500, currentStock: 500, minStock: 50 },
   { id: '31', name: 'Listrik', category: 'Overhead', unit: 'unit', price: 10, initialStock: 1000, currentStock: 1000, minStock: 100 },

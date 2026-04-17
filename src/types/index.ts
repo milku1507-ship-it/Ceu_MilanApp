@@ -13,6 +13,7 @@ export type Ingredient = {
 
 export type HppMaterial = {
   id?: string;
+  ingredientId?: string;
   nama: string;
   satuan: string;
   qty: number;

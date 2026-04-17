@@ -8,6 +8,7 @@ import {
   User,
   browserPopupRedirectResolver,
   indexedDBLocalPersistence,
+  browserLocalPersistence,
   initializeAuth
 } from 'firebase/auth';
 import { 
@@ -48,16 +49,20 @@ const firestoreDatabaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || firebas
 // Initialize Firebase
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// Use initializeAuth with specific persistence and resolver to fix "Pending promise was never set" errors
-// This is more robust in iframes and complex browser environments
+// Use initializeAuth with specific persistence and resolver
+// We use indexedDBLocalPersistence for better compatibility in iframes, 
+// but fallback to browserLocalPersistence which is standard for web.
 let authInstance;
 try {
+  // Check if we are in an iframe
+  const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
+  
   authInstance = initializeAuth(app, {
-    persistence: indexedDBLocalPersistence,
+    persistence: isInIframe ? indexedDBLocalPersistence : browserLocalPersistence,
     popupRedirectResolver: browserPopupRedirectResolver,
   });
 } catch (e) {
-  console.warn('Auth already initialized or failed to initialize with custom settings, falling back to getAuth');
+  // If already initialized or fails, use getAuth
   authInstance = getAuth(app);
 }
 

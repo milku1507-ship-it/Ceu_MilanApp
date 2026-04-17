@@ -8,7 +8,7 @@ export function formatSmartUnit(value: number, unit: string): string {
       const kgValue = value / 1000;
       return `${Number(kgValue.toFixed(3))} kg`;
     }
-    return `${value} ${unit}`;
+    return `${value} gram`;
   }
   
   // Milliliter to Liter
@@ -17,7 +17,7 @@ export function formatSmartUnit(value: number, unit: string): string {
       const literValue = value / 1000;
       return `${Number(literValue.toFixed(3))} liter`;
     }
-    return `${value} ${unit}`;
+    return `${value} ml`;
   }
 
   // Milligram to Gram
