@@ -119,14 +119,17 @@ export default function TransactionManager({ user, transactions, setTransactions
     penjualan_detail: []
   });
 
-  const [selectedMaterialId, setSelectedMaterialId] = React.useState<string>('');
-
-  const [selectedProductIds, setSelectedProductIds] = React.useState<string[]>([]);
-
   const [selectedTxIds, setSelectedTxIds] = React.useState<string[]>([]);
+  const [selectedMaterialId, setSelectedMaterialId] = React.useState<string>('');
+  
   const [isSaving, setIsSaving] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isRange, setIsRange] = React.useState(false);
+
+  // Derive selected product IDs from penjualan_detail to prevent double counting and state sync issues
+  const selectedProductIds = React.useMemo(() => {
+    return newTx.penjualan_detail?.map(pd => pd.produk_id) || [];
+  }, [newTx.penjualan_detail]);
 
   const filteredTransactions = transactions
     .filter(t => {
@@ -186,16 +189,30 @@ export default function TransactionManager({ user, transactions, setTransactions
       
       const involvedProductIds = new Set<string>();
 
+      // Use a Map to aggregate totals per variant to prevent any potential double counting from state drift
+      const qtyByVariantId = new Map<string, number>();
+      
       newTx.penjualan_detail.forEach(pd => {
         involvedProductIds.add(pd.produk_id);
         pd.varian.forEach(v => {
-          totalQty += v.qty;
-          const product = products.find(p => p.id === pd.produk_id);
-          const variant = product?.varian.find(varItem => varItem.id === v.varian_id);
-          if (variant) {
-            subtotal += v.qty * variant.harga_jual;
-          }
+          const current = qtyByVariantId.get(v.varian_id) || 0;
+          qtyByVariantId.set(v.varian_id, current + v.qty);
         });
+      });
+
+      // Calculate totals from the aggregated map
+      qtyByVariantId.forEach((qty, variantId) => {
+        totalQty += qty;
+        // Find variant in products
+        let found = false;
+        for (const p of products) {
+          const variant = p.varian.find(v => v.id === variantId);
+          if (variant) {
+            subtotal += qty * variant.harga_jual;
+            found = true;
+            break; // Stop after finding the variant to prevent any potential double counting from schema errors
+          }
+        }
       });
 
       // Calculate Fees (once per unique fee name across all involved products)
@@ -220,33 +237,40 @@ export default function TransactionManager({ user, transactions, setTransactions
         }
       });
 
-      setNewTx(prev => ({ ...prev, qty_total: totalQty, nominal: subtotal + totalFees }));
+      setNewTx(prev => ({ 
+        ...prev, 
+        qty_total: totalQty, 
+        nominal: subtotal - totalFees,
+        total_penjualan: subtotal,
+        total_biaya: totalFees
+      }));
     }
   }, [newTx.penjualan_detail, newTx.kategori, products]);
 
   const toggleProduct = (productId: string) => {
-    setSelectedProductIds(prev => {
-      if (prev.includes(productId)) {
-        const next = prev.filter(id => id !== productId);
-        setNewTx(tx => ({
-          ...tx,
-          penjualan_detail: tx.penjualan_detail?.filter(pd => pd.produk_id !== productId)
-        }));
-        return next;
+    setNewTx(prev => {
+      const isSelected = prev.penjualan_detail?.some(pd => pd.produk_id === productId);
+      if (isSelected) {
+        return {
+          ...prev,
+          penjualan_detail: prev.penjualan_detail?.filter(pd => pd.produk_id !== productId)
+        };
       } else {
         const product = products.find(p => p.id === productId);
-        if (product) {
-          const newDetail: PenjualanDetail = {
-            produk_id: product.id,
-            produk_nama: product.nama,
-            varian: product.varian.map(v => ({ varian_id: v.id, varian_nama: v.nama, qty: 0 }))
-          };
-          setNewTx(tx => ({
-            ...tx,
-            penjualan_detail: [...(tx.penjualan_detail || []), newDetail]
-          }));
-        }
-        return [...prev, productId];
+        if (!product) return prev;
+        
+        // Prevent duplicate entries by checking if it already exists
+        if (prev.penjualan_detail?.some(pd => pd.produk_id === productId)) return prev;
+
+        const newDetail: PenjualanDetail = {
+          produk_id: product.id,
+          produk_nama: product.nama,
+          varian: product.varian.map(v => ({ varian_id: v.id, varian_nama: v.nama, qty: 0 }))
+        };
+        return {
+          ...prev,
+          penjualan_detail: [...(prev.penjualan_detail || []), newDetail]
+        };
       }
     });
   };
@@ -283,6 +307,7 @@ export default function TransactionManager({ user, transactions, setTransactions
       // Create a map for faster lookup by ID
       const ingredientIdMap = new Map(ingredients.map(i => [i.id, i]));
 
+      let totalHpp = 0;
       if (newTx.jenis === 'Pengeluaran') {
         // pengeluaran -> tambah stok
         if (selectedMaterialId) {
@@ -301,35 +326,41 @@ export default function TransactionManager({ user, transactions, setTransactions
             pd.varian.forEach(pv => {
               if (pv.qty > 0) {
                 const variant = product.varian.find(v => v.id === pv.varian_id);
-                if (variant && variant.bahan) {
-                  variant.bahan.forEach(bahan => {
-                    // Always prefer ingredientId if available, fallback to name-based lookup for legacy data
-                    let ingredient = bahan.ingredientId ? ingredientIdMap.get(bahan.ingredientId) : null;
-                    
-                    if (!ingredient && bahan.nama) {
-                      const normalizedName = bahan.nama.toLowerCase().trim();
-                      ingredient = ingredients.find(i => i.name.toLowerCase().trim() === normalizedName);
-                    }
+                if (variant) {
+                  // Add variant packing cost to HPP
+                  totalHpp += (variant.harga_packing || 0) * pv.qty;
+                  
+                  if (variant.bahan) {
+                    variant.bahan.forEach(bahan => {
+                      // Always prefer ingredientId if available, fallback to name-based lookup for legacy data
+                      let ingredient = bahan.ingredientId ? ingredientIdMap.get(bahan.ingredientId) : null;
+                      
+                      if (!ingredient && bahan.nama) {
+                        const normalizedName = bahan.nama.toLowerCase().trim();
+                        ingredient = ingredients.find(i => i.name.toLowerCase().trim() === normalizedName);
+                      }
 
-                    if (ingredient) {
-                      const totalUsage = (bahan.qty || 0) * pv.qty;
-                      const delta = -totalUsage;
-                      
-                      const existingSnapshot = snapshot.find(s => s.ingredientId === ingredient!.id);
-                      if (existingSnapshot) {
-                        existingSnapshot.delta += delta;
-                      } else {
-                        snapshot.push({ ingredientId: ingredient!.id, stockBefore: ingredient!.currentStock || 0, delta });
+                      if (ingredient) {
+                        const totalUsage = (bahan.qty || 0) * pv.qty;
+                        totalHpp += totalUsage * ingredient.price;
+                        const delta = -totalUsage;
+                        
+                        const existingSnapshot = snapshot.find(s => s.ingredientId === ingredient!.id);
+                        if (existingSnapshot) {
+                          existingSnapshot.delta += delta;
+                        } else {
+                          snapshot.push({ ingredientId: ingredient!.id, stockBefore: ingredient!.currentStock || 0, delta });
+                        }
+                        
+                        const existingUpdate = stockUpdates.find(u => u.id === ingredient!.id);
+                        if (existingUpdate) {
+                          existingUpdate.delta += delta;
+                        } else {
+                          stockUpdates.push({ id: ingredient!.id, delta });
+                        }
                       }
-                      
-                      const existingUpdate = stockUpdates.find(u => u.id === ingredient!.id);
-                      if (existingUpdate) {
-                        existingUpdate.delta += delta;
-                      } else {
-                        stockUpdates.push({ id: ingredient!.id, delta });
-                      }
-                    }
-                  });
+                    });
+                  }
                 }
               }
             });
@@ -353,6 +384,15 @@ export default function TransactionManager({ user, transactions, setTransactions
       }
 
       const txId = Math.random().toString(36).substr(2, 9);
+      
+      const isPemasukan = (newTx.jenis || 'Pengeluaran') === 'Pemasukan';
+      const isPenjualan = isPemasukan && newTx.kategori === 'Penjualan';
+      
+      const currentNominal = Number(newTx.nominal) || 0;
+      const currentTotalPenjualan = isPenjualan ? (newTx.total_penjualan ?? currentNominal) : (isPemasukan ? currentNominal : 0);
+      const currentTotalBiaya = isPenjualan ? (newTx.total_biaya ?? 0) : 0;
+      const currentLaba = isPemasukan ? (isPenjualan ? (currentNominal - totalHpp) : currentNominal) : -currentNominal;
+      
       const tx: any = {
         id: txId,
         tanggal: newTx.tanggal || new Date().toISOString().split('T')[0],
@@ -361,7 +401,10 @@ export default function TransactionManager({ user, transactions, setTransactions
         kategori: newTx.kategori || 'Lainnya',
         jenis: newTx.jenis || 'Pengeluaran',
         type: (newTx.jenis || 'Pengeluaran').toLowerCase() as 'pemasukan' | 'pengeluaran',
-        nominal: Number(newTx.nominal) || 0,
+        nominal: currentNominal,
+        total_penjualan: currentTotalPenjualan,
+        total_biaya: currentTotalBiaya,
+        laba: currentLaba,
         qty_total: newTx.qty_total || 0,
         qty_beli: newTx.qty_beli || 0,
         createdAt: serverTimestamp()
@@ -424,7 +467,6 @@ export default function TransactionManager({ user, transactions, setTransactions
 
       // Update local state and reset form
       setSelectedMaterialId('');
-      setSelectedProductIds([]);
       setSelectedTxIds([]);
       setIsRange(false);
       
@@ -948,7 +990,7 @@ export default function TransactionManager({ user, transactions, setTransactions
             <Button 
               onClick={handleAddTransaction}
               disabled={isSaving}
-              className="w-full orange-gradient text-white font-bold h-14 rounded-2xl shadow-lg shadow-brand-200 mt-4 active:scale-95 transition-transform"
+              className="w-full orange-gradient text-white font-bold h-14 rounded-2xl shadow-lg shadow-brand-200 mt-4 active:scale-95 transition-all hover:shadow-xl"
             >
               {isSaving ? 'Menyimpan...' : 'Simpan Transaksi'}
             </Button>

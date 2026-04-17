@@ -35,32 +35,54 @@ export default function FinancialReport({ transactions, products }: FinancialRep
     return true;
   });
 
-  const totalIncome = filteredTransactions
+  const totalGrossIncome = filteredTransactions
     .filter(t => t.jenis === 'Pemasukan')
-    .reduce((acc, t) => acc + t.nominal, 0);
+    .reduce((acc, t) => acc + (t.total_penjualan ?? t.nominal), 0);
   
-  const totalExpense = filteredTransactions
+  const totalTransactionFees = filteredTransactions
+    .filter(t => t.jenis === 'Pemasukan')
+    .reduce((acc, t) => acc + (t.total_biaya ?? 0), 0);
+
+  const totalOtherExpense = filteredTransactions
     .filter(t => t.jenis === 'Pengeluaran')
     .reduce((acc, t) => acc + t.nominal, 0);
+
+  const totalIncome = totalGrossIncome;
+  const totalExpense = totalOtherExpense + totalTransactionFees;
 
   const netProfit = totalIncome - totalExpense;
   const margin = totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0;
 
   // Category breakdown for Pie Chart
   const categoryData = filteredTransactions.reduce((acc: any[], t) => {
-    const existing = acc.find(item => item.name === t.kategori);
+    const isPenjualan = t.kategori === 'Penjualan' && t.jenis === 'Pemasukan';
+    const value = isPenjualan ? (t.total_penjualan ?? t.nominal) : t.nominal;
+    const catName = t.kategori;
+
+    const existing = acc.find(item => item.name === catName);
     if (existing) {
-      existing.value += t.nominal;
+      existing.value += value;
     } else {
-      acc.push({ name: t.kategori, value: t.nominal, jenis: t.jenis });
+      acc.push({ name: catName, value: value, jenis: t.jenis });
     }
+    
+    // Add transaction fees to expense if any
+    if (isPenjualan && (t.total_biaya ?? 0) > 0) {
+      const feeCat = acc.find(item => item.name === 'Biaya Transaksi');
+      if (feeCat) {
+        feeCat.value += t.total_biaya!;
+      } else {
+        acc.push({ name: 'Biaya Transaksi', value: t.total_biaya!, jenis: 'Pengeluaran' });
+      }
+    }
+
     return acc;
   }, []);
 
   const expenseCategories = categoryData.filter(c => c.jenis === 'Pengeluaran');
 
   // Grouped expenses for the table
-  const expenseTableData = CATEGORIES_LIST
+  const rawExpenseData = CATEGORIES_LIST
     .filter(c => c.type === 'Pengeluaran' || c.name === 'Lainnya')
     .map(cat => {
       const txs = filteredTransactions.filter(t => t.kategori === cat.name && t.jenis === 'Pengeluaran');
@@ -72,6 +94,17 @@ export default function FinancialReport({ transactions, products }: FinancialRep
       };
     })
     .filter(item => item.total > 0 || item.count > 0);
+
+  // Add Biaya Transaksi to the table if present
+  if (totalTransactionFees > 0) {
+    rawExpenseData.push({
+      name: 'Biaya Transaksi',
+      total: totalTransactionFees,
+      count: filteredTransactions.filter(t => t.total_biaya && t.total_biaya > 0).length
+    });
+  }
+
+  const expenseTableData = rawExpenseData.sort((a, b) => b.total - a.total);
 
   const COLORS = ['#E53935', '#4ADE80', '#60A5FA', '#F472B6', '#A78BFA', '#FBBF24', '#94A3B8'];
 

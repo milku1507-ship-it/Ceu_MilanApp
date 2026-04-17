@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { 
   Calculator, Save, Plus, Edit2, Trash2, ChevronRight, ArrowLeft, 
-  Package, Info, TrendingUp, DollarSign, MoreVertical, Copy
+  Package, Info, TrendingUp, DollarSign, MoreVertical, Copy, Search
 } from 'lucide-react';
 import { Product, Variant, HppMaterial, Ingredient, AdditionalFee } from '../types';
 import { User } from 'firebase/auth';
@@ -21,6 +21,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 
 import { auth, db, doc, setDoc, deleteDoc, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
 import { useSettings } from '../SettingsContext';
@@ -61,6 +74,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   const [categoryToDelete, setCategoryToDelete] = React.useState<string | null>(null);
   const [editingMaterial, setEditingMaterial] = React.useState<{ material: HppMaterial, index: number } | null>(null);
   const [productFees, setProductFees] = React.useState<AdditionalFee[]>([]);
+  const [isMaterialPopoverOpen, setIsMaterialPopoverOpen] = React.useState(false);
 
   const selectedProduct = products.find(p => p.id === selectedProductId);
   const selectedVariant = selectedProduct?.varian.find(v => v.id === selectedVariantId);
@@ -561,7 +575,12 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   };
 
   const calculateHpp = (bahan: HppMaterial[], packingCost: number = 0) => {
-    return bahan.reduce((acc, b) => acc + (b.qty * b.harga), 0) + packingCost;
+    return bahan.reduce((acc, b) => {
+      const ingredient = ingredients.find(i => i.id === b.ingredientId);
+      // Use current price from ingredients table if available (Single Source of Truth)
+      const currentPrice = ingredient ? ingredient.price : b.harga;
+      return acc + (b.qty * currentPrice);
+    }, 0) + packingCost;
   };
 
   // Render Helpers
@@ -892,7 +911,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                   <Button 
                     onClick={handleSaveHpp}
                     disabled={isSaving}
-                    className="w-full mt-4 orange-gradient text-white font-bold h-12 rounded-2xl shadow-lg shadow-brand-200 gap-2"
+                    className="w-full mt-4 orange-gradient text-white font-bold h-12 rounded-2xl shadow-lg shadow-brand-200 gap-2 active:scale-95 transition-all hover:shadow-xl"
                   >
                     <Save className="w-4 h-4" />
                     {isSaving ? 'Menyimpan...' : 'Simpan Data HPP'}
@@ -1058,8 +1077,85 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           </DialogHeader>
           <form key={editingMaterial ? `mat-${editingMaterial.variantId}-${editingMaterial.index}` : 'new-material'} onSubmit={handleSaveMaterial} className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="mat-nama" className="font-bold">Nama Bahan</Label>
-              <Input id="mat-nama" name="nama" defaultValue={editingMaterial?.material.nama || ''} placeholder="Contoh: Tepung Tapioka" required className="rounded-xl" />
+              <Label className="font-bold">Nama Bahan</Label>
+              <Popover open={isMaterialPopoverOpen} onOpenChange={setIsMaterialPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    className={cn(
+                      "w-full justify-between rounded-xl h-12 font-medium border-gray-100",
+                      !editingMaterial?.material.nama && "text-muted-foreground"
+                    )}
+                  >
+                    {editingMaterial?.material.nama || "Pilih atau cari bahan..."}
+                    <div className="flex items-center gap-2">
+                      <Search className="w-4 h-4 text-gray-400" />
+                    </div>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0 rounded-2xl border-none shadow-2xl" align="start">
+                  <Command className="rounded-2xl border-none">
+                    <CommandInput placeholder="Cari bahan baku..." className="h-12" />
+                    <CommandList className="max-h-[300px] custom-scrollbar">
+                      <CommandEmpty>
+                        <div className="p-4 text-center">
+                          <p className="text-sm text-gray-500 mb-2">Bahan tidak ditemukan.</p>
+                          <Button 
+                            variant="link" 
+                            className="text-primary font-bold h-auto p-0"
+                            onClick={() => {
+                              const input = document.querySelector('[cmdk-input]') as HTMLInputElement;
+                              const newName = input?.value || "Bahan Baru";
+                              setEditingMaterial(prev => prev ? {
+                                ...prev,
+                                material: { ...prev.material, nama: newName }
+                              } : null);
+                              setIsMaterialPopoverOpen(false);
+                            }}
+                          >
+                            + Tambah sebagai bahan baru
+                          </Button>
+                        </div>
+                      </CommandEmpty>
+                      <CommandGroup heading="Bahan Baku Tersedia">
+                        {ingredients.map((i) => (
+                          <CommandItem
+                            key={i.id}
+                            value={i.name}
+                            onSelect={() => {
+                              setEditingMaterial(prev => prev ? {
+                                ...prev,
+                                material: {
+                                  ...prev.material,
+                                  nama: i.name,
+                                  kelompok: i.category,
+                                  satuan: i.unit,
+                                  harga: i.price,
+                                  ingredientId: i.id
+                                }
+                              } : null);
+                              setIsMaterialPopoverOpen(false);
+                            }}
+                            className="font-medium p-3"
+                          >
+                            <div className="flex flex-col">
+                              <span className="font-bold text-gray-900">{i.name}</span>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Badge variant="outline" className="text-[9px] border-none bg-brand-50 text-brand-600 px-1.5 font-bold uppercase tracking-wider">
+                                  {i.category}
+                                </Badge>
+                                <span className="text-[10px] text-gray-400 font-bold">{formatCurrency(i.price)} / {i.unit}</span>
+                              </div>
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              <input type="hidden" name="nama" value={editingMaterial?.material.nama || ''} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="mat-kelompok" className="font-bold">Kelompok</Label>

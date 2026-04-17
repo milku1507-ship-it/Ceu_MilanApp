@@ -65,6 +65,9 @@ export type Transaction = {
   jenis: 'Pemasukan' | 'Pengeluaran';
   type?: 'pemasukan' | 'pengeluaran'; // Alias for compatibility
   nominal: number;
+  total_penjualan?: number;
+  total_biaya?: number;
+  laba?: number;
   qty_total: number;
   qty_beli: number;
   penjualan_detail?: PenjualanDetail[];
