@@ -121,60 +121,60 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   // Product CRUD
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("[HPPManager] Starting handleSaveProduct...");
     setIsSaving(true);
-    const formData = new FormData(e.target as HTMLFormElement);
-    const nama = formData.get('nama') as string;
-    const deskripsi = (formData.get('deskripsi') as string) || '';
+    
+    try {
+      const formData = new FormData(e.target as HTMLFormElement);
+      const nama = formData.get('nama') as string;
+      const deskripsi = (formData.get('deskripsi') as string) || '';
 
-    if (editingProduct) {
-      const updatedProduct = { ...editingProduct, nama, deskripsi, biaya_lain: productFees };
-      
-      // Optimistic update
-      setProducts(prev => prev.map(p => p.id === editingProduct.id ? updatedProduct : p));
-      
-      // Close modal immediately for responsiveness
-      setIsProductModalOpen(false);
-      setEditingProduct(null);
+      if (editingProduct) {
+        const updatedProduct = { ...editingProduct, nama, deskripsi, biaya_lain: productFees };
+        
+        // Optimistic update
+        setProducts(prev => prev.map(p => p.id === editingProduct.id ? updatedProduct : p));
+        
+        // Close modal immediately for responsiveness
+        setIsProductModalOpen(false);
+        setEditingProduct(null);
+        toast.success('Produk diperbarui ✓');
 
-      try {
         if (user) {
+          console.log("[HPPManager] Syncing updated product to Firestore...");
           await setDoc(doc(db, `users/${user.uid}/hpp/${editingProduct.id}`), sanitizeData(updatedProduct));
         }
-        toast.success('Produk diperbarui ✓');
-      } catch (error) {
-        if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${editingProduct.id}`);
-        toast.error('Gagal menyimpan produk');
-      } finally {
-        setIsSaving(false);
-      }
-    } else {
-      const id = 'prod_' + Math.random().toString(36).substr(2, 9);
-      const newProduct: Product = {
-        id,
-        nama,
-        deskripsi,
-        varian: [],
-        biaya_lain: productFees
-      };
-      
-      // Optimistic update
-      setProducts(prev => [...prev, newProduct]);
-      
-      // Close modal immediately for responsiveness
-      setIsProductModalOpen(false);
-      setEditingProduct(null);
+      } else {
+        const id = 'prod_' + Math.random().toString(36).substr(2, 9);
+        const newProduct: Product = {
+          id,
+          nama,
+          deskripsi,
+          varian: [],
+          biaya_lain: productFees
+        };
+        
+        // Optimistic update
+        setProducts(prev => [...prev, newProduct]);
+        
+        // Close modal immediately for responsiveness
+        setIsProductModalOpen(false);
+        setEditingProduct(null);
+        toast.success('Produk ditambahkan ✓');
 
-      try {
         if (user) {
+          console.log("[HPPManager] Creating new product in Firestore...");
           await setDoc(doc(db, `users/${user.uid}/hpp/${id}`), sanitizeData(newProduct));
         }
-        toast.success('Produk ditambahkan ✓');
-      } catch (error) {
-        if (user) handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/hpp/${id}`);
-        toast.error('Gagal menyimpan produk');
-      } finally {
-        setIsSaving(false);
       }
+      console.log("[HPPManager] handleSaveProduct finished successfully.");
+    } catch (error) {
+      console.error("[HPPManager] Error in handleSaveProduct:", error);
+      if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp`);
+      toast.error('Gagal menyimpan produk');
+    } finally {
+      setIsSaving(false);
+      console.log("[HPPManager] setIsSaving(false) called in handleSaveProduct.");
     }
   };
 
@@ -222,58 +222,62 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
   // Variant CRUD
   const handleSaveVariant = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("[HPPManager] Starting handleSaveVariant...");
     setIsSaving(true);
-    const formData = new FormData(e.target as HTMLFormElement);
-    const nama = formData.get('nama') as string;
-    const harga_jual = parseInt(formData.get('harga_jual') as string) || 0;
-    const qty_batch = parseInt(formData.get('qty_batch') as string) || 145;
-    const harga_packing = parseInt(formData.get('harga_packing') as string) || 12000;
-
-    if (!selectedProductId) {
-      setIsSaving(false);
-      return;
-    }
-
-    const product = products.find(p => p.id === selectedProductId);
-    if (!product) {
-      setIsSaving(false);
-      return;
-    }
-
-    let updatedVarian;
-    if (editingVariant) {
-      updatedVarian = product.varian.map(v => v.id === editingVariant.id ? { ...v, nama, harga_jual, qty_batch, harga_packing } : v);
-    } else {
-      const newVariant: Variant = {
-        id: 'var_' + Math.random().toString(36).substr(2, 9),
-        nama,
-        harga_jual,
-        qty_batch,
-        harga_packing,
-        bahan: []
-      };
-      updatedVarian = [...product.varian, newVariant];
-    }
-
-    const updatedProduct = { ...product, varian: updatedVarian };
-
-    // Optimistic update
-    setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
     
-    // Close modal immediately for responsiveness
-    setIsVariantModalOpen(false);
-    setEditingVariant(null);
-
     try {
+      const formData = new FormData(e.target as HTMLFormElement);
+      const nama = formData.get('nama') as string;
+      const harga_jual = parseInt(formData.get('harga_jual') as string) || 0;
+      const qty_batch = parseInt(formData.get('qty_batch') as string) || 145;
+      const harga_packing = parseInt(formData.get('harga_packing') as string) || 12000;
+
+      if (!selectedProductId) {
+        throw new Error("Produk tidak dipilih");
+      }
+
+      const product = products.find(p => p.id === selectedProductId);
+      if (!product) {
+        throw new Error("Produk tidak ditemukan");
+      }
+
+      let updatedVarian;
+      if (editingVariant) {
+        updatedVarian = product.varian.map(v => v.id === editingVariant.id ? { ...v, nama, harga_jual, qty_batch, harga_packing } : v);
+      } else {
+        const newVariant: Variant = {
+          id: 'var_' + Math.random().toString(36).substr(2, 9),
+          nama,
+          harga_jual,
+          qty_batch,
+          harga_packing,
+          bahan: []
+        };
+        updatedVarian = [...product.varian, newVariant];
+      }
+
+      const updatedProduct = { ...product, varian: updatedVarian };
+
+      // Optimistic update
+      setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
+      
+      // Close modal immediately for responsiveness
+      setIsVariantModalOpen(false);
+      setEditingVariant(null);
+      toast.success(editingVariant ? 'Varian diperbarui ✓' : 'Varian ditambahkan ✓');
+
       if (user) {
+        console.log("[HPPManager] Syncing variant to Firestore...");
         await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
       }
-      toast.success(editingVariant ? 'Varian diperbarui ✓' : 'Varian ditambahkan ✓');
+      console.log("[HPPManager] handleSaveVariant finished successfully.");
     } catch (error) {
+      console.error("[HPPManager] Error in handleSaveVariant:", error);
       if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
       toast.error('Gagal menyimpan varian');
     } finally {
       setIsSaving(false);
+      console.log("[HPPManager] setIsSaving(false) called in handleSaveVariant.");
     }
   };
 
@@ -456,121 +460,131 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     e.preventDefault();
     if (!editingMaterial || !activeHppVariant) return;
     
+    console.log("[HPPManager] Starting handleSaveMaterial...");
     setIsSaving(true);
-    const formData = new FormData(e.target as HTMLFormElement);
-    const nama = (formData.get('nama') as string).trim();
-    const kelompok = formData.get('kelompok') as string;
-    const qty = parseFloat(formData.get('qty') as string) || 0;
-    const harga = parseFloat(formData.get('harga') as string) || 0;
-    const satuan = formData.get('satuan') as string;
-
-    // FIND OR CREATE INGREDIENT IN GLOBAL LIST
-    let ingredientId = editingMaterial.material.ingredientId;
     
-    // Find by name if ID is missing (legacy)
-    if (!ingredientId) {
-       const existingByNama = ingredients.find(i => i.name.toLowerCase().trim() === nama.toLowerCase().trim());
-       if (existingByNama) ingredientId = existingByNama.id;
-    }
+    try {
+      const formData = new FormData(e.target as HTMLFormElement);
+      const nama = (formData.get('nama') as string).trim();
+      const kelompok = formData.get('kelompok') as string;
+      const qty = parseFloat(formData.get('qty') as string) || 0;
+      const harga = parseFloat(formData.get('harga') as string) || 0;
+      const satuan = formData.get('satuan') as string;
 
-    if (!ingredientId) {
-       // Truly new ingredient
-       ingredientId = 'ing_' + Math.random().toString(36).substr(2, 9);
-    }
+      // FIND OR CREATE INGREDIENT IN GLOBAL LIST
+      let ingredientId = editingMaterial.material.ingredientId;
+      
+      // Find by name if ID is missing (legacy)
+      if (!ingredientId) {
+         const existingByNama = ingredients.find(i => i.name.toLowerCase().trim() === nama.toLowerCase().trim());
+         if (existingByNama) ingredientId = existingByNama.id;
+      }
 
-    // Update global ingredients list (Single Source of Truth)
-    const existingIng = ingredients.find(i => i.id === ingredientId);
-    if (existingIng) {
-      const updatedIng = {
-        ...existingIng,
-        name: nama,
-        category: kelompok,
-        price: harga,
-        unit: satuan,
-        fromHpp: true
-      };
-      
-      // Update locally
-      setIngredients(prev => prev.map(i => i.id === ingredientId ? updatedIng : i));
-      
-      // Update Firestore
-      if (user) {
-        try {
+      if (!ingredientId) {
+         // Truly new ingredient
+         ingredientId = 'ing_' + Math.random().toString(36).substr(2, 9);
+      }
+
+      // Update global ingredients list (Single Source of Truth)
+      const existingIng = ingredients.find(i => i.id === ingredientId);
+      if (existingIng) {
+        const updatedIng = {
+          ...existingIng,
+          name: nama,
+          category: kelompok,
+          price: harga,
+          unit: satuan,
+          fromHpp: true
+        };
+        
+        // Update locally
+        setIngredients(prev => prev.map(i => i.id === ingredientId ? updatedIng : i));
+        
+        // Update Firestore
+        if (user) {
+          console.log("[HPPManager] Syncing ingredient to Firestore stock...");
           await setDoc(doc(db, `users/${user.uid}/stok/${ingredientId}`), sanitizeData(updatedIng));
-        } catch (error) {
-           console.error('Failed to sync ingredient to stock:', error);
+        }
+      } else {
+        // Create new ingredient
+        const newIng: Ingredient = {
+          id: ingredientId,
+          name: nama,
+          category: kelompok,
+          unit: satuan,
+          price: harga,
+          initialStock: 0,
+          currentStock: 0,
+          minStock: 0,
+          fromHpp: true
+        };
+        
+        setIngredients(prev => [...prev, newIng]);
+        
+         if (user) {
+          console.log("[HPPManager] Creating new ingredient in Firestore stock...");
+          await setDoc(doc(db, `users/${user.uid}/stok/${ingredientId}`), sanitizeData(newIng));
         }
       }
-    } else {
-      // Create new ingredient
-      const newIng: Ingredient = {
-        id: ingredientId,
-        name: nama,
-        category: kelompok,
-        unit: satuan,
-        price: harga,
-        initialStock: 0,
-        currentStock: 0,
-        minStock: 0,
-        fromHpp: true
+
+      const newBahan = [...activeHppVariant.bahan];
+      newBahan[editingMaterial.index] = { 
+        ...newBahan[editingMaterial.index], 
+        ingredientId,
+        nama, 
+        kelompok, 
+        qty, 
+        harga,
+        satuan
       };
       
-      setIngredients(prev => [...prev, newIng]);
-      
-       if (user) {
-        try {
-          await setDoc(doc(db, `users/${user.uid}/stok/${ingredientId}`), sanitizeData(newIng));
-        } catch (error) {
-           console.error('Failed to create ingredient in stock:', error);
-        }
-      }
+      setActiveHppVariant({ ...activeHppVariant, bahan: newBahan });
+      setIsMaterialModalOpen(false);
+      setEditingMaterial(null);
+      toast.success('Bahan diperbarui & Stok disinkronkan ✓');
+      console.log("[HPPManager] handleSaveMaterial finished successfully.");
+    } catch (error) {
+      console.error("[HPPManager] Error in handleSaveMaterial:", error);
+      toast.error('Gagal menyimpan bahan');
+    } finally {
+      setIsSaving(false);
+      console.log("[HPPManager] setIsSaving(false) called in handleSaveMaterial.");
     }
-
-    const newBahan = [...activeHppVariant.bahan];
-    newBahan[editingMaterial.index] = { 
-      ...newBahan[editingMaterial.index], 
-      ingredientId,
-      nama, 
-      kelompok, 
-      qty, 
-      harga,
-      satuan
-    };
-    
-    setActiveHppVariant({ ...activeHppVariant, bahan: newBahan });
-    setIsMaterialModalOpen(false);
-    setEditingMaterial(null);
-    setIsSaving(false);
-    toast.success('Bahan diperbarui & Stok disinkronkan ✓');
   };
   const handleSaveHpp = async () => {
     if (!activeHppVariant || !selectedProductId) return;
     
+    console.log("[HPPManager] Starting handleSaveHpp...");
     setIsSaving(true);
-    const product = products.find(p => p.id === selectedProductId);
-    if (!product) {
-      setIsSaving(false);
-      return;
-    }
-
-    const updatedProduct = {
-      ...product,
-      varian: product.varian.map(v => v.id === activeHppVariant.id ? activeHppVariant : v)
-    };
-
-    // Optimistic update
-    setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
-    toast.success('Data HPP berhasil disimpan ✓');
-    setView('variants');
-
+    
     try {
+      const product = products.find(p => p.id === selectedProductId);
+      if (!product) {
+        throw new Error("Produk tidak ditemukan");
+      }
+
+      const updatedProduct = {
+        ...product,
+        varian: product.varian.map(v => v.id === activeHppVariant.id ? activeHppVariant : v)
+      };
+
+      // Optimistic update
+      setProducts(prev => prev.map(p => p.id === selectedProductId ? updatedProduct : p));
+      toast.success('Data HPP berhasil disimpan ✓');
+      setView('variants');
+
       if (user) {
+        console.log("[HPPManager] Syncing HPP data to Firestore...");
         await setDoc(doc(db, `users/${user.uid}/hpp/${selectedProductId}`), sanitizeData(updatedProduct));
       }
+      console.log("[HPPManager] handleSaveHpp finished successfully.");
     } catch (error) {
+      console.error("[HPPManager] Error in handleSaveHpp:", error);
       if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/hpp/${selectedProductId}`);
+      toast.error('Gagal menyimpan total HPP');
     } finally {
       setIsSaving(false);
+      console.log("[HPPManager] setIsSaving(false) called in handleSaveHpp.");
     }
   };
 
@@ -1057,7 +1071,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             </div>
             <DialogFooter className="pt-4 flex flex-col-reverse sm:flex-row gap-3">
               <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold w-full sm:w-auto h-12">Batal</Button>} />
-              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold w-full sm:w-auto h-12 px-8 shadow-lg shadow-brand-100">
+              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold w-full sm:w-auto h-12 px-8 shadow-lg shadow-brand-100 active:scale-95 transition-all">
                 {isSaving ? (
                   <span className="flex items-center gap-2">
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
@@ -1190,7 +1204,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             </div>
             <DialogFooter className="pt-4 flex flex-col-reverse sm:flex-row gap-3">
               <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold w-full sm:w-auto h-12">Batal</Button>} />
-              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold w-full sm:w-auto h-12 px-8 shadow-lg shadow-brand-100">
+              <Button type="submit" disabled={isSaving} className="bg-primary hover:bg-primary/90 text-white rounded-xl font-bold w-full sm:w-auto h-12 px-8 shadow-lg shadow-brand-100 active:scale-95 transition-all">
                 {isSaving ? (
                   <span className="flex items-center gap-2">
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />

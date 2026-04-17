@@ -36,11 +36,9 @@ export default function FinancialReport({ transactions, products }: FinancialRep
   });
 
   const totalGrossIncome = filteredTransactions
-    .filter(t => t.jenis === 'Pemasukan')
-    .reduce((acc, t) => acc + (t.total_penjualan ?? t.nominal), 0);
+    .reduce((acc, t) => acc + (t.total_penjualan ?? (t.jenis === 'Pemasukan' ? t.nominal : 0)), 0);
   
   const totalTransactionFees = filteredTransactions
-    .filter(t => t.jenis === 'Pemasukan')
     .reduce((acc, t) => acc + (t.total_biaya ?? 0), 0);
 
   const totalOtherExpense = filteredTransactions
@@ -50,13 +48,14 @@ export default function FinancialReport({ transactions, products }: FinancialRep
   const totalIncome = totalGrossIncome;
   const totalExpense = totalOtherExpense + totalTransactionFees;
 
-  const netProfit = totalIncome - totalExpense;
+  // Use stored laba directly as the definitive net profit
+  const netProfit = filteredTransactions.reduce((acc, t) => acc + (t.laba ?? 0), 0);
   const margin = totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0;
 
   // Category breakdown for Pie Chart
   const categoryData = filteredTransactions.reduce((acc: any[], t) => {
     const isPenjualan = t.kategori === 'Penjualan' && t.jenis === 'Pemasukan';
-    const value = isPenjualan ? (t.total_penjualan ?? t.nominal) : t.nominal;
+    const value = t.total_penjualan ?? t.nominal;
     const catName = t.kategori;
 
     const existing = acc.find(item => item.name === catName);
@@ -66,13 +65,14 @@ export default function FinancialReport({ transactions, products }: FinancialRep
       acc.push({ name: catName, value: value, jenis: t.jenis });
     }
     
-    // Add transaction fees to expense if any
-    if (isPenjualan && (t.total_biaya ?? 0) > 0) {
+    // Add transaction fees to expense if any (from source of truth)
+    const fees = t.total_biaya ?? 0;
+    if (fees > 0) {
       const feeCat = acc.find(item => item.name === 'Biaya Transaksi');
       if (feeCat) {
-        feeCat.value += t.total_biaya!;
+        feeCat.value += fees;
       } else {
-        acc.push({ name: 'Biaya Transaksi', value: t.total_biaya!, jenis: 'Pengeluaran' });
+        acc.push({ name: 'Biaya Transaksi', value: fees, jenis: 'Pengeluaran' });
       }
     }
 

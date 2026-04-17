@@ -297,6 +297,7 @@ export default function TransactionManager({ user, transactions, setTransactions
       return;
     }
 
+    console.log("[TransactionManager] Starting handleAddTransaction...");
     setIsSaving(true);
     
     try {
@@ -342,7 +343,7 @@ export default function TransactionManager({ user, transactions, setTransactions
 
                       if (ingredient) {
                         const totalUsage = (bahan.qty || 0) * pv.qty;
-                        totalHpp += totalUsage * ingredient.price;
+                        totalHpp += totalUsage * (ingredient.price || 0);
                         const delta = -totalUsage;
                         
                         const existingSnapshot = snapshot.find(s => s.ingredientId === ingredient!.id);
@@ -419,7 +420,7 @@ export default function TransactionManager({ user, transactions, setTransactions
       }
 
       if (user) {
-        // Update local state IMMEDIATELY (Optimistic Update)
+        // PERFORM OPTIMISTIC UPDATE IMMEDIATELY
         if (stockUpdates.length > 0) {
           setIngredients(prev => prev.map(ing => {
             const update = stockUpdates.find(u => u.id === ing.id);
@@ -431,26 +432,34 @@ export default function TransactionManager({ user, transactions, setTransactions
         }
         setTransactions(prev => [tx, ...prev]);
 
+        // RESET UI IMMEDIATELY
+        setSelectedMaterialId('');
+        setSelectedTxIds([]);
+        setIsRange(false);
+        setNewTx({
+          tanggal: new Date().toISOString().split('T')[0],
+          tanggal_akhir: null,
+          jenis: 'Pemasukan',
+          kategori: 'Penjualan',
+          nominal: 0,
+          keterangan: '',
+          penjualan_detail: []
+        });
+        if (onSuccess) onSuccess();
+
         const batch = writeBatch(db);
-        
-        // Add transaction
         batch.set(doc(db, `users/${user.uid}/transaksi/${txId}`), sanitizeData(tx));
-        
-        // Update ingredients
         stockUpdates.forEach(update => {
           batch.update(doc(db, `users/${user.uid}/stok/${update.id}`), {
             currentStock: increment(update.delta)
           });
         });
 
-        // Wait for server to confirm before continuing (to fulfill "Loading state" requirement)
+        console.log("[TransactionManager] Committing batch to Firestore...");
         await batch.commit();
-        
-        setIsSaving(false);
-        toast.success('Transaksi berhasil dicatat! ✓');
-        if (onSuccess) onSuccess();
+        toast.success('Transaksi tersimpan ✓');
       } else {
-        // Update ingredients state locally
+        // Update local state and reset form
         if (stockUpdates.length > 0) {
           setIngredients(prev => prev.map(ing => {
             const update = stockUpdates.find(u => u.id === ing.id);
@@ -461,36 +470,31 @@ export default function TransactionManager({ user, transactions, setTransactions
           }));
         }
         setTransactions(prev => [tx, ...prev]);
-        toast.success('Transaksi berhasil dicatat! ✓');
+        
+        setSelectedMaterialId('');
+        setSelectedTxIds([]);
+        setIsRange(false);
+        setNewTx({
+          tanggal: new Date().toISOString().split('T')[0],
+          tanggal_akhir: null,
+          jenis: 'Pemasukan',
+          kategori: 'Penjualan',
+          nominal: 0,
+          keterangan: '',
+          penjualan_detail: []
+        });
+        toast.success('Transaksi dicatat (Local) ✓');
         if (onSuccess) onSuccess();
       }
 
-      // Update local state and reset form
-      setSelectedMaterialId('');
-      setSelectedTxIds([]);
-      setIsRange(false);
-      
-      const today = new Date().toISOString().split('T')[0];
-      setNewTx({
-        tanggal: today,
-        tanggal_akhir: null,
-        jenis: 'Pemasukan',
-        kategori: 'Penjualan',
-        nominal: 0,
-        keterangan: '',
-        qty_total: 0,
-        qty_beli: 0,
-        penjualan_detail: []
-      });
-
-      // Refocus to date input for next entry
+      // Refocus to date input
       setTimeout(() => {
         dateInputRef.current?.focus();
       }, 100);
 
-      if (onSuccess) onSuccess();
+      console.log("[TransactionManager] handleAddTransaction finished successfully.");
     } catch (error) {
-      console.error('Add Transaction Error:', error);
+      console.error("[TransactionManager] Add Transaction Error:", error);
       const errMessage = error instanceof Error ? error.message : String(error);
       let displayError = errMessage;
       try {
@@ -504,6 +508,7 @@ export default function TransactionManager({ user, transactions, setTransactions
       });
     } finally {
       setIsSaving(false);
+      console.log("[TransactionManager] setIsSaving(false) called in handleAddTransaction.");
     }
   };
 
@@ -530,27 +535,43 @@ export default function TransactionManager({ user, transactions, setTransactions
   const confirmDelete = async (rollback: boolean) => {
     if (!txToDelete) return;
     setIsDeleting(true);
-    const toastId = toast.loading(rollback ? 'Mengembalikan stok...' : 'Menghapus transaksi...');
+    const txId = txToDelete.id;
 
+    // OPTIMISTIC UI: Close immediately
+    setIsDeleteConfirmOpen(false);
+    
     if (user) {
-      try {
-        const batch = writeBatch(db);
-        batch.delete(doc(db, `users/${user.uid}/transaksi/${txToDelete.id}`));
-        
-        if (rollback && txToDelete.stockSnapshot) {
-          txToDelete.stockSnapshot.forEach(snapshot => {
-            batch.update(doc(db, `users/${user.uid}/stok/${snapshot.ingredientId}`), {
-              currentStock: snapshot.stockBefore
-            });
+      const batch = writeBatch(db);
+      batch.delete(doc(db, `users/${user.uid}/transaksi/${txId}`));
+      
+      if (rollback && txToDelete.stockSnapshot) {
+        txToDelete.stockSnapshot.forEach(snapshot => {
+          batch.update(doc(db, `users/${user.uid}/stok/${snapshot.ingredientId}`), {
+            currentStock: snapshot.stockBefore
           });
-        }
-        
-        await batch.commit();
-        toast.success(rollback ? 'Transaksi dihapus dan stok berhasil dikembalikan ✓' : 'Transaksi dihapus, stok tidak berubah', { id: toastId });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/${txToDelete.id}`);
-        toast.error('Gagal menghapus transaksi', { id: toastId });
+        });
+
+        // Local rollback (optimistic)
+        setIngredients(prev => prev.map(ing => {
+          const snapshot = txToDelete.stockSnapshot?.find(s => s.ingredientId === ing.id);
+          if (snapshot) return { ...ing, currentStock: snapshot.stockBefore };
+          return ing;
+        }));
       }
+      
+      setTransactions(prev => prev.filter(t => t.id !== txId));
+      setSelectedTxIds(prev => prev.filter(id => id !== txId));
+      toast.success(rollback ? 'Transaksi & Stok dipulihkan ✓' : 'Transaksi dihapus ✓');
+
+      batch.commit().then(() => {
+        setIsDeleting(false);
+        setTxToDelete(null);
+      }).catch(error => {
+        setIsDeleting(false);
+        setTxToDelete(null);
+        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/${txId}`);
+        toast.error('Gagal hapus di awan');
+      });
     } else {
       if (rollback && txToDelete.stockSnapshot) {
         setIngredients(prev => prev.map(ing => {
@@ -560,17 +581,15 @@ export default function TransactionManager({ user, transactions, setTransactions
           }
           return ing;
         }));
-        toast.success('Transaksi dihapus dan stok berhasil dikembalikan ✓', { id: toastId });
+        toast.success('Transaksi dihapus dan stok berhasil dikembalikan ✓');
       } else {
-        toast.success('Transaksi dihapus, stok tidak berubah', { id: toastId });
+        toast.success('Transaksi dihapus, stok tidak berubah');
       }
       setTransactions(prev => prev.filter(t => t.id !== txToDelete.id));
+      setSelectedTxIds(prev => prev.filter(id => id !== txToDelete.id));
+      setTxToDelete(null);
+      setIsDeleting(false);
     }
-
-    setSelectedTxIds(prev => prev.filter(id => id !== txToDelete.id));
-    setIsDeleteConfirmOpen(false);
-    setTxToDelete(null);
-    setIsDeleting(false);
   };
 
   const toggleSelectTx = (id: string) => {

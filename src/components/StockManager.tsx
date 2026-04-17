@@ -88,46 +88,55 @@ export default function StockManager({ user, ingredients, setIngredients, transa
   const handleEditIngredient = async () => {
     if (!editingIngredient) return;
     
+    console.log("[StockManager] Starting handleEditIngredient...");
     setIsSaving(true);
-    if (user) {
-      try {
+    
+    try {
+      if (user) {
         // Optimistic update
         setIngredients(prev => prev.map(i => i.id === editingIngredient.id ? editingIngredient : i));
         
-        await setDoc(doc(db, `users/${user.uid}/stok/${editingIngredient.id}`), sanitizeData(editingIngredient));
+        // Close modal immediately
         setIsEditDialogOpen(false);
         setEditingIngredient(null);
         toast.success(`Bahan ${editingIngredient.name} berhasil diperbarui ✓`);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/stok/${editingIngredient.id}`);
-        // Rollback if needed (though onSnapshot will eventually fix it)
-      } finally {
-        setIsSaving(false);
+
+        console.log("[StockManager] Syncing ingredient to Firestore...");
+        await setDoc(doc(db, `users/${user.uid}/stok/${editingIngredient.id}`), sanitizeData(editingIngredient));
+      } else {
+        setIngredients(prev => prev.map(i => i.id === editingIngredient.id ? editingIngredient : i));
+        setIsEditDialogOpen(false);
+        setEditingIngredient(null);
+        toast.success(`Bahan ${editingIngredient.name} berhasil diperbarui ✓`);
       }
-    } else {
-      setIngredients(prev => prev.map(i => i.id === editingIngredient.id ? editingIngredient : i));
-      setIsEditDialogOpen(false);
-      setEditingIngredient(null);
-      toast.success(`Bahan ${editingIngredient.name} berhasil diperbarui ✓`);
+      console.log("[StockManager] handleEditIngredient finished successfully.");
+    } catch (error) {
+      console.error("[StockManager] Error in handleEditIngredient:", error);
+      if (user) handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/stok/${editingIngredient.id}`);
+      toast.error("Gagal sinkron data");
+    } finally {
       setIsSaving(false);
+      console.log("[StockManager] setIsSaving(false) called in handleEditIngredient.");
     }
   };
 
   const handleDeleteIngredient = async () => {
     if (!deletingIngredientId) return;
     
+    // OPTIMISTIC UI: Close dialog & clear state immediately
+    setIsDeleteDialogOpen(false);
+    const ingredientIdToDelete = deletingIngredientId;
+    setDeletingIngredientId(null);
+
     if (user) {
-      try {
-        await deleteDoc(doc(db, `users/${user.uid}/stok/${deletingIngredientId}`));
-      } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/stok/${deletingIngredientId}`);
-      }
+      deleteDoc(doc(db, `users/${user.uid}/stok/${ingredientIdToDelete}`)).catch(error => {
+        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/stok/${ingredientIdToDelete}`);
+        toast.error("Gagal menghapus di penyimpanan awan");
+      });
     } else {
-      setIngredients(prev => prev.filter(i => i.id !== deletingIngredientId));
+      setIngredients(prev => prev.filter(i => i.id !== ingredientIdToDelete));
     }
 
-    setIsDeleteDialogOpen(false);
-    setDeletingIngredientId(null);
     toast.success("Bahan berhasil dihapus");
   };
 
@@ -358,7 +367,7 @@ export default function StockManager({ user, ingredients, setIngredients, transa
             </div>
           )}
           <DialogFooter>
-            <Button onClick={handleEditIngredient} disabled={isSaving} className="orange-gradient text-white font-bold rounded-2xl w-full h-12">
+            <Button onClick={handleEditIngredient} disabled={isSaving} className="orange-gradient text-white font-bold rounded-2xl w-full h-12 active:scale-95 transition-all hover:shadow-lg">
               {isSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
             </Button>
           </DialogFooter>
