@@ -1,69 +1,87 @@
 
+export const UNIT_DETAILS: Record<string, { base: string, rate: number }> = {
+  'gram': { base: 'gram', rate: 1 },
+  'gr': { base: 'gram', rate: 1 },
+  'g': { base: 'gram', rate: 1 },
+  'kg': { base: 'gram', rate: 1000 },
+  'kilogram': { base: 'gram', rate: 1000 },
+  'ml': { base: 'ml', rate: 1 },
+  'mililiter': { base: 'ml', rate: 1 },
+  'liter': { base: 'ml', rate: 1000 },
+  'l': { base: 'ml', rate: 1000 },
+  'mg': { base: 'mg', rate: 1 },
+  'miligram': { base: 'mg', rate: 1 },
+  'cm': { base: 'cm', rate: 1 },
+  'centimeter': { base: 'cm', rate: 1 },
+  'm': { base: 'cm', rate: 100 },
+  'meter': { base: 'cm', rate: 100 },
+};
+
+export function getBaseUnit(unit: string): string {
+  const lower = unit.toLowerCase().trim();
+  return UNIT_DETAILS[lower]?.base || lower;
+}
+
+export function getConversionRate(unit: string): number {
+  const lower = unit.toLowerCase().trim();
+  return UNIT_DETAILS[lower]?.rate || 1;
+}
+
+/**
+ * Converts a value from a display unit to its base unit.
+ * Example: toBaseValue(1, 'kg') -> 1000 (since base is gram)
+ */
+export function toBaseValue(value: number, unit: string): number {
+  return value * getConversionRate(unit);
+}
+
+/**
+ * Converts a value from a base unit to a display unit.
+ * Example: fromBaseValue(1000, 'kg') -> 1
+ */
+export function fromBaseValue(value: number, unit: string): number {
+  const rate = getConversionRate(unit);
+  return value / rate;
+}
+
 export function formatSmartUnit(value: number, unit: string): string {
-  const lowerUnit = unit.toLowerCase().trim();
-  
-  // Gram to Kilogram
-  if (lowerUnit === 'gram' || lowerUnit === 'gr' || lowerUnit === 'g') {
-    if (Math.abs(value) >= 1000) {
-      const kgValue = value / 1000;
-      return `${Number(kgValue.toFixed(3))} kg`;
+  if (!unit) return `${value}`;
+  const base = getBaseUnit(unit);
+  const rate = getConversionRate(unit);
+  const valInBase = value * rate;
+
+  // Gram/Kg logic
+  if (base === 'gram') {
+    if (Math.abs(valInBase) >= 1000) {
+      return `${Number((valInBase / 1000).toFixed(3))} kg`;
     }
-    return `${value} gram`;
+    return `${Number(valInBase.toFixed(3))} gram`;
   }
   
-  // Milliliter to Liter
-  if (lowerUnit === 'ml' || lowerUnit === 'mililiter') {
-    if (Math.abs(value) >= 1000) {
-      const literValue = value / 1000;
-      return `${Number(literValue.toFixed(3))} liter`;
+  // Ml/Liter logic
+  if (base === 'ml') {
+    if (Math.abs(valInBase) >= 1000) {
+      return `${Number((valInBase / 1000).toFixed(3))} liter`;
     }
-    return `${value} ml`;
+    return `${Number(valInBase.toFixed(3))} ml`;
   }
 
-  // Milligram to Gram
-  if (lowerUnit === 'mg' || lowerUnit === 'miligram') {
-    if (Math.abs(value) >= 1000) {
-      const gramValue = value / 1000;
-      return `${Number(gramValue.toFixed(3))} gram`;
+  // Mg to Gram
+  if (base === 'mg') {
+    if (Math.abs(valInBase) >= 1000) {
+      return `${Number((valInBase / 1000).toFixed(3))} gram`;
     }
-    return `${value} ${unit}`;
+    return `${Number(valInBase.toFixed(3))} mg`;
   }
 
-  // Centimeter to Meter
-  if (lowerUnit === 'cm' || lowerUnit === 'centimeter') {
-    if (Math.abs(value) >= 100) {
-      const meterValue = value / 100;
-      return `${Number(meterValue.toFixed(3))} m`;
+  // Cm to Meter
+  if (base === 'cm') {
+    if (Math.abs(valInBase) >= 100) {
+      return `${Number((valInBase / 100).toFixed(3))} m`;
     }
-    return `${value} ${unit}`;
+    return `${Number(valInBase.toFixed(3))} cm`;
   }
 
   // Default: return value and unit as is
   return `${value} ${unit}`;
-}
-
-/**
- * Splits a formatted string back into value and unit if needed, 
- * but usually we just need the display string.
- */
-export function getSmartUnitDisplay(value: number, unit: string): { value: number, unit: string } {
-  const lowerUnit = unit.toLowerCase().trim();
-  
-  if ((lowerUnit === 'gram' || lowerUnit === 'gr' || lowerUnit === 'g') && Math.abs(value) >= 1000) {
-    return { value: value / 1000, unit: 'kg' };
-  }
-  
-  if ((lowerUnit === 'ml' || lowerUnit === 'mililiter') && Math.abs(value) >= 1000) {
-    return { value: value / 1000, unit: 'liter' };
-  }
-
-  if ((lowerUnit === 'mg' || lowerUnit === 'miligram') && Math.abs(value) >= 1000) {
-    return { value: value / 1000, unit: 'gram' };
-  }
-
-  if ((lowerUnit === 'cm' || lowerUnit === 'centimeter') && Math.abs(value) >= 100) {
-    return { value: value / 100, unit: 'm' };
-  }
-
-  return { value, unit };
 }

@@ -23,7 +23,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { auth, db, doc, setDoc, deleteDoc, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
 import { useSettings } from '../SettingsContext';
-import { formatSmartUnit } from '../lib/unitUtils';
+import { formatSmartUnit, fromBaseValue, getBaseUnit, getConversionRate, toBaseValue } from '../lib/unitUtils';
 import { formatCurrency } from '../lib/formatUtils';
 
 interface StockManagerProps {
@@ -93,8 +93,13 @@ export default function StockManager({ user, ingredients, setIngredients, transa
     
     try {
       if (user) {
+        const updatedIng = {
+          ...editingIngredient,
+          unit: getBaseUnit(editingIngredient.unit)
+        };
+        
         // Optimistic update
-        setIngredients(prev => prev.map(i => i.id === editingIngredient.id ? editingIngredient : i));
+        setIngredients(prev => prev.map(i => i.id === editingIngredient.id ? updatedIng : i));
         
         // Close modal immediately
         setIsEditDialogOpen(false);
@@ -102,9 +107,13 @@ export default function StockManager({ user, ingredients, setIngredients, transa
         toast.success(`Bahan ${editingIngredient.name} berhasil diperbarui ✓`);
 
         console.log("[StockManager] Syncing ingredient to Firestore...");
-        await setDoc(doc(db, `users/${user.uid}/stok/${editingIngredient.id}`), sanitizeData(editingIngredient));
+        await setDoc(doc(db, `users/${user.uid}/stok/${editingIngredient.id}`), sanitizeData(updatedIng));
       } else {
-        setIngredients(prev => prev.map(i => i.id === editingIngredient.id ? editingIngredient : i));
+        const updatedIng = {
+          ...editingIngredient,
+          unit: getBaseUnit(editingIngredient.unit)
+        };
+        setIngredients(prev => prev.map(i => i.id === editingIngredient.id ? updatedIng : i));
         setIsEditDialogOpen(false);
         setEditingIngredient(null);
         toast.success(`Bahan ${editingIngredient.name} berhasil diperbarui ✓`);
@@ -239,92 +248,113 @@ export default function StockManager({ user, ingredients, setIngredients, transa
 
       {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[500px] rounded-3xl">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[550px] rounded-[2.5rem] max-h-[95dvh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="p-6 pb-2">
             <DialogTitle className="text-xl font-black">Edit Bahan</DialogTitle>
             <DialogDescription className="font-medium">
               Perbarui informasi bahan baku.
             </DialogDescription>
           </DialogHeader>
-          {editingIngredient && (
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-2 sm:gap-4">
-                <Label htmlFor="edit-name" className="sm:text-right font-bold">Nama</Label>
-                <Input
-                  id="edit-name"
-                  value={editingIngredient.name}
-                  onChange={(e) => setEditingIngredient({...editingIngredient, name: e.target.value})}
-                  className="sm:col-span-3 rounded-xl"
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-2 sm:gap-4">
-                <Label htmlFor="edit-category" className="sm:text-right font-bold">Kelompok</Label>
-                <select
-                  id="edit-category"
-                  value={editingIngredient.category}
-                  onChange={(e) => setEditingIngredient({...editingIngredient, category: e.target.value})}
-                  className="sm:col-span-3 h-10 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium"
-                >
-                  {settings?.kategori_hpp.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                  {!settings?.kategori_hpp.includes(editingIngredient.category) && (
-                    <option value={editingIngredient.category}>{editingIngredient.category}</option>
-                  )}
-                  <option value="Lainnya">Lainnya</option>
-                </select>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-2 sm:gap-4">
-                <Label htmlFor="edit-unit" className="sm:text-right font-bold">Satuan</Label>
-                <Input
-                  id="edit-unit"
-                  value={editingIngredient.unit}
-                  onChange={(e) => setEditingIngredient({...editingIngredient, unit: e.target.value})}
-                  className="sm:col-span-3 rounded-xl"
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-2 sm:gap-4">
-                <Label htmlFor="edit-price" className="sm:text-right font-bold">Harga/Satuan</Label>
-                <Input
-                  id="edit-price"
-                  type="number"
-                  value={editingIngredient.price}
-                  onChange={(e) => setEditingIngredient({...editingIngredient, price: parseFloat(e.target.value) || 0})}
-                  className="sm:col-span-3 rounded-xl"
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-2 sm:gap-4">
-                <Label htmlFor="edit-stock" className="sm:text-right font-bold">Stok Saat Ini</Label>
-                <Input
-                  id="edit-stock"
-                  type="number"
-                  value={editingIngredient.currentStock}
-                  onChange={(e) => setEditingIngredient({...editingIngredient, currentStock: parseFloat(e.target.value) || 0})}
-                  className="sm:col-span-3 rounded-xl"
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-2 sm:gap-4">
-                <Label htmlFor="edit-minStock" className="sm:text-right font-bold">Min. Stok</Label>
-                <Input
-                  id="edit-minStock"
-                  type="number"
-                  value={editingIngredient.minStock}
-                  onChange={(e) => setEditingIngredient({...editingIngredient, minStock: parseFloat(e.target.value) || 0})}
-                  className="sm:col-span-3 rounded-xl"
-                />
-              </div>
-
-              {/* Riwayat Stok Section */}
-              <div className="mt-4 pt-4 border-t border-gray-100">
-                <div className="flex items-center gap-2 mb-3">
-                  <History className="w-4 h-4 text-primary" />
-                  <h3 className="text-sm font-black text-[#1A1A2E]">Riwayat Stok Masuk & Keluar</h3>
+          
+          <div className="flex-1 overflow-y-auto px-6 py-2 scroll-smooth">
+            {editingIngredient && (
+              <div className="grid gap-4 pb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-2 sm:gap-4">
+                  <Label htmlFor="edit-name" className="sm:text-right font-bold">Nama</Label>
+                  <Input
+                    id="edit-name"
+                    value={editingIngredient.name}
+                    onChange={(e) => setEditingIngredient({...editingIngredient, name: e.target.value})}
+                    className="sm:col-span-3 rounded-xl"
+                  />
                 </div>
-                <ScrollArea className="h-[200px] pr-4">
+                {/* ... other fields ... */}
+                <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-2 sm:gap-4">
+                  <Label htmlFor="edit-category" className="sm:text-right font-bold">Kelompok</Label>
+                  <select
+                    id="edit-category"
+                    value={editingIngredient.category}
+                    onChange={(e) => setEditingIngredient({...editingIngredient, category: e.target.value})}
+                    className="sm:col-span-3 h-10 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium"
+                  >
+                    {settings?.kategori_hpp.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                    {!settings?.kategori_hpp.includes(editingIngredient.category) && (
+                      <option value={editingIngredient.category}>{editingIngredient.category}</option>
+                    )}
+                    <option value="Lainnya">Lainnya</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-2 sm:gap-4">
+                  <Label htmlFor="edit-unit" className="sm:text-right font-bold">Satuan</Label>
+                  <select
+                    id="edit-unit"
+                    value={editingIngredient.unit || 'gram'}
+                    onChange={(e) => {
+                      const newUnit = e.target.value;
+                      setEditingIngredient({...editingIngredient, unit: newUnit});
+                    }}
+                    className="sm:col-span-3 h-10 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium"
+                  >
+                    {settings?.satuan_unit.map(u => (
+                      <option key={u} value={u.toLowerCase()}>{u}</option>
+                    ))}
+                    {!settings?.satuan_unit.map(u => u.toLowerCase()).includes(editingIngredient.unit?.toLowerCase() || '') && editingIngredient.unit && (
+                      <option value={editingIngredient.unit}>{editingIngredient.unit}</option>
+                    )}
+                  </select>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-2 sm:gap-4">
+                  <Label htmlFor="edit-price" className="sm:text-right font-bold">Harga/Satuan</Label>
+                  <Input
+                    id="edit-price"
+                    type="number"
+                    value={editingIngredient.price * getConversionRate(editingIngredient.unit)}
+                    onChange={(e) => {
+                      const newVal = parseFloat(e.target.value) || 0;
+                      setEditingIngredient({...editingIngredient, price: newVal / getConversionRate(editingIngredient.unit)});
+                    }}
+                    className="sm:col-span-3 rounded-xl"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-2 sm:gap-4">
+                  <Label htmlFor="edit-stock" className="sm:text-right font-bold">Stok Saat Ini</Label>
+                  <Input
+                    id="edit-stock"
+                    type="number"
+                    value={fromBaseValue(editingIngredient.currentStock, editingIngredient.unit)}
+                    onChange={(e) => {
+                      const newVal = parseFloat(e.target.value) || 0;
+                      setEditingIngredient({...editingIngredient, currentStock: toBaseValue(newVal, editingIngredient.unit)});
+                    }}
+                    className="sm:col-span-3 rounded-xl"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-2 sm:gap-4">
+                  <Label htmlFor="edit-minStock" className="sm:text-right font-bold">Min. Stok</Label>
+                  <Input
+                    id="edit-minStock"
+                    type="number"
+                    value={fromBaseValue(editingIngredient.minStock, editingIngredient.unit)}
+                    onChange={(e) => {
+                      const newVal = parseFloat(e.target.value) || 0;
+                      setEditingIngredient({...editingIngredient, minStock: toBaseValue(newVal, editingIngredient.unit)});
+                    }}
+                    className="sm:col-span-3 rounded-xl"
+                  />
+                </div>
+
+                {/* Riwayat Stok Section */}
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                  <div className="flex items-center gap-2 mb-3">
+                    <History className="w-4 h-4 text-primary" />
+                    <h3 className="text-sm font-black text-[#1A1A2E]">Riwayat Stok Masuk & Keluar</h3>
+                  </div>
                   <div className="space-y-2">
                     {transactions
                       .filter(tx => tx.stockSnapshot?.some(s => s.ingredientId === editingIngredient.id))
-                      .slice(0, 20)
+                      .slice(0, 10)
                       .map(tx => {
                         const snapshot = tx.stockSnapshot?.find(s => s.ingredientId === editingIngredient.id);
                         const isStockIn = snapshot && snapshot.delta > 0;
@@ -339,8 +369,8 @@ export default function StockManager({ user, ingredients, setIngredients, transa
                                 {isStockIn ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownLeft className="w-4 h-4" />}
                               </div>
                               <div>
-                                <p className="text-xs font-black text-[#1A1A2E]">{tx.keterangan || tx.kategori}</p>
-                                <p className="text-[10px] font-medium text-gray-400">{new Date(tx.tanggal).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                                <p className="text-xs font-black text-[#1A1A2E] truncate max-w-[120px]">{tx.keterangan || tx.kategori}</p>
+                                <p className="text-[10px] font-medium text-gray-400">{new Date(tx.tanggal).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</p>
                               </div>
                             </div>
                             <div className="text-right">
@@ -350,23 +380,23 @@ export default function StockManager({ user, ingredients, setIngredients, transa
                               )}>
                                 {isStockIn ? '+' : ''}{formatSmartUnit(snapshot?.delta || 0, editingIngredient.unit)}
                               </p>
-                              <p className="text-[10px] font-medium text-gray-400">Sisa: {formatSmartUnit((snapshot?.stockBefore || 0) + (snapshot?.delta || 0), editingIngredient.unit)}</p>
                             </div>
                           </div>
                         );
                       })}
                     {transactions.filter(tx => tx.stockSnapshot?.some(s => s.ingredientId === editingIngredient.id)).length === 0 && (
-                      <div className="text-center py-8">
+                      <div className="text-center py-6">
                         <History className="w-8 h-8 text-gray-200 mx-auto mb-2" />
                         <p className="text-xs text-gray-400 font-medium">Belum ada riwayat stok.</p>
                       </div>
                     )}
                   </div>
-                </ScrollArea>
+                </div>
               </div>
-            </div>
-          )}
-          <DialogFooter>
+            )}
+          </div>
+
+          <DialogFooter className="p-6 pt-2 bg-white border-t border-gray-50">
             <Button onClick={handleEditIngredient} disabled={isSaving} className="orange-gradient text-white font-bold rounded-2xl w-full h-12 active:scale-95 transition-all hover:shadow-lg">
               {isSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
             </Button>
@@ -427,7 +457,7 @@ export default function StockManager({ user, ingredients, setIngredients, transa
 
       {/* History Dialog */}
       <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
-        <DialogContent className="sm:max-w-[500px] rounded-3xl max-h-[80vh] flex flex-col p-0 overflow-hidden">
+        <DialogContent className="sm:max-w-[500px] rounded-[2.5rem] max-h-[90dvh] flex flex-col p-0 overflow-hidden">
           <DialogHeader className="p-6 pb-2">
             <DialogTitle className="text-xl font-black flex items-center gap-2">
               <History className="w-5 h-5 text-primary" />
@@ -438,8 +468,7 @@ export default function StockManager({ user, ingredients, setIngredients, transa
             </DialogDescription>
           </DialogHeader>
           
-          <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full px-6 pb-6">
+          <div className="flex-1 overflow-y-auto px-6 pb-6 scroll-smooth">
               <div className="space-y-3 mt-4">
                 {transactions
                   .filter(t => t.stockSnapshot?.some(s => s.ingredientId === historyIngredient?.id))
@@ -482,14 +511,13 @@ export default function StockManager({ user, ingredients, setIngredients, transa
                   </div>
                 )}
               </div>
-            </ScrollArea>
-          </div>
+            </div>
         </DialogContent>
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-[400px] rounded-3xl">
+        <DialogContent className="sm:max-w-[400px] rounded-[2rem] max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl font-black">Hapus Bahan?</DialogTitle>
             <DialogDescription className="font-medium">

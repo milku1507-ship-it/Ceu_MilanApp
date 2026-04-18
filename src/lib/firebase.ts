@@ -32,6 +32,13 @@ import {
   increment,
   enableNetwork 
 } from 'firebase/firestore';
+import { 
+  getStorage, 
+  ref, 
+  uploadBytes, 
+  getDownloadURL, 
+  deleteObject 
+} from 'firebase/storage';
 import firebaseConfigImport from '../../firebase-applet-config.json';
 
 // Support environment variables for Vercel deployment
@@ -85,10 +92,12 @@ try {
 
 export const db = dbInstance;
 
-// Force network connection
-enableNetwork(db).catch(err => console.warn('Initial enableNetwork failed:', err));
-
+export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
+
+// Force network connection
+export { signInWithPopup, signOut, onAuthStateChanged, doc, collection, setDoc, getDoc, getDocs, onSnapshot, query, where, deleteDoc, writeBatch, serverTimestamp, arrayUnion, arrayRemove, updateDoc, addDoc, increment, ref, uploadBytes, getDownloadURL, deleteObject };
+export type { User };
 
 // Error Handling Types
 export enum OperationType {
@@ -183,6 +192,3 @@ export function sanitizeData(data: any): any {
 
 // Removed testFirestoreConnection to avoid false positive error messages in the UI
 // The SDK's own error handling and our handleFirestoreError will manage real issues.
-
-export { signInWithPopup, signOut, onAuthStateChanged, doc, collection, setDoc, getDoc, getDocs, onSnapshot, query, where, deleteDoc, writeBatch, serverTimestamp, arrayUnion, arrayRemove, updateDoc, addDoc, increment };
-export type { User };

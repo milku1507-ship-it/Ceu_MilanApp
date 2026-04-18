@@ -37,7 +37,7 @@ import {
 
 import { auth, db, doc, setDoc, deleteDoc, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
 import { useSettings } from '../SettingsContext';
-import { formatSmartUnit } from '../lib/unitUtils';
+import { formatSmartUnit, fromBaseValue, getBaseUnit, getConversionRate, toBaseValue } from '../lib/unitUtils';
 import { formatCurrency } from '../lib/formatUtils';
 
 interface HPPManagerProps {
@@ -127,10 +127,11 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     try {
       const formData = new FormData(e.target as HTMLFormElement);
       const nama = formData.get('nama') as string;
+      const sku = (formData.get('sku') as string) || '';
       const deskripsi = (formData.get('deskripsi') as string) || '';
 
       if (editingProduct) {
-        const updatedProduct = { ...editingProduct, nama, deskripsi, biaya_lain: productFees };
+        const updatedProduct = { ...editingProduct, nama, sku, deskripsi, biaya_lain: productFees };
         
         // Optimistic update
         setProducts(prev => prev.map(p => p.id === editingProduct.id ? updatedProduct : p));
@@ -148,6 +149,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         const id = 'prod_' + Math.random().toString(36).substr(2, 9);
         const newProduct: Product = {
           id,
+          sku,
           nama,
           deskripsi,
           varian: [],
@@ -467,9 +469,14 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
       const formData = new FormData(e.target as HTMLFormElement);
       const nama = (formData.get('nama') as string).trim();
       const kelompok = formData.get('kelompok') as string;
-      const qty = parseFloat(formData.get('qty') as string) || 0;
-      const harga = parseFloat(formData.get('harga') as string) || 0;
-      const satuan = formData.get('satuan') as string;
+      const qtyInput = parseFloat(formData.get('qty') as string) || 0;
+      const satuanInput = formData.get('satuan') as string;
+      const hargaInput = parseFloat(formData.get('harga') as string) || 0;
+
+      // Map to base unit and base value for storage
+      const satuan = getBaseUnit(satuanInput);
+      const qty = toBaseValue(qtyInput, satuanInput);
+      const harga = hargaInput / getConversionRate(satuanInput); // Price per base unit
 
       // FIND OR CREATE INGREDIENT IN GLOBAL LIST
       let ingredientId = editingMaterial.material.ingredientId;
@@ -588,13 +595,48 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
     }
   };
 
-  const calculateHpp = (bahan: HppMaterial[], packingCost: number = 0) => {
-    return bahan.reduce((acc, b) => {
-      const ingredient = ingredients.find(i => i.id === b.ingredientId);
-      // Use current price from ingredients table if available (Single Source of Truth)
-      const currentPrice = ingredient ? ingredient.price : b.harga;
-      return acc + (b.qty * currentPrice);
-    }, 0) + packingCost;
+  const getMaterialCost = (b: HppMaterial) => {
+    const ingredient = ingredients.find(i => i.id === b.ingredientId);
+    let price = b.harga;
+    let usage = Number(b.qty) || 0;
+    
+    if (ingredient) {
+      price = ingredient.price;
+      const ingUnit = ingredient.unit;
+      const matUnit = b.satuan;
+      
+      const ingBase = getBaseUnit(ingUnit);
+      const matBase = getBaseUnit(matUnit);
+
+      if (ingBase === matBase) {
+        // Both refer to the same base (e.g. gram and kg)
+        // Convert usage to base, and multiply by price-per-base
+        usage = toBaseValue(usage, matUnit);
+        // We assume ingredient.price is per ingredient.unit
+        const pricePerBase = price / getConversionRate(ingUnit);
+        return usage * pricePerBase;
+      }
+    }
+    return usage * price;
+  };
+
+  const calculateHpp = (bahan: HppMaterial[], packingCost: number = 0, qtyBatch: number = 1) => {
+    const totalMaterials = bahan.reduce((acc, b) => acc + getMaterialCost(b), 0);
+    const qBatch = Math.max(1, Number(qtyBatch) || 1);
+    
+    // HPP per Pcs = (Total Bahan per Batch + Total Packing per Batch) / Qty per Batch
+    return (totalMaterials + (Number(packingCost) || 0)) / qBatch;
+  };
+
+  const calculateBatchHpp = (bahan: HppMaterial[], packingCost: number = 0) => {
+    const totalMaterials = bahan.reduce((acc, b) => acc + getMaterialCost(b), 0);
+    return totalMaterials + (Number(packingCost) || 0);
+  };
+
+  const calculateMaterialsPerPcs = (bahan: HppMaterial[], qtyBatch: number = 1) => {
+    const totalMaterials = bahan.reduce((acc, b) => acc + getMaterialCost(b), 0);
+    const qBatch = Math.max(1, Number(qtyBatch) || 1);
+    return totalMaterials / qBatch;
   };
 
   // Render Helpers
@@ -676,7 +718,14 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                     </Button>
                   </div>
                 </div>
-                <h3 className="text-xl font-black text-[#1A1A2E] mb-1">{p.nama}</h3>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-xl font-black text-[#1A1A2E]">{p.nama}</h3>
+                  {p.sku && (
+                    <Badge variant="outline" className="text-[10px] border-primary/20 bg-brand-50 text-primary px-2 font-bold uppercase tracking-wider h-5">
+                      SKU: {p.sku}
+                    </Badge>
+                  )}
+                </div>
                 <p className="text-sm text-gray-500 mb-4 line-clamp-2">{p.deskripsi || 'Tidak ada deskripsi'}</p>
                 <div className="flex items-center justify-between">
                   <Badge className="bg-brand-100 text-primary border-none font-bold">
@@ -702,8 +751,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4">
             {selectedProduct?.varian.map(v => {
-              const hppBatch = calculateHpp(v.bahan);
-              const hppPcs = hppBatch / v.qty_batch;
+              const hppPcs = calculateHpp(v.bahan, v.harga_packing, v.qty_batch);
               const margin = v.harga_jual > 0 ? ((v.harga_jual - hppPcs) / v.harga_jual) * 100 : 0;
               
               return (
@@ -714,7 +762,9 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                         <Calculator className="w-6 h-6" />
                       </div>
                       <div className="min-w-0">
-                        <h3 className="text-lg font-black text-[#1A1A2E] truncate">{v.nama}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-lg font-black text-[#1A1A2E] truncate">{v.nama}</h3>
+                        </div>
                         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
                           <span className="text-[10px] md:text-xs font-bold text-gray-400">HPP: <span className="text-primary">{v.bahan.length > 0 ? formatCurrency(Math.round(hppPcs), true) : '—'}</span></span>
                           <span className="text-[10px] md:text-xs font-bold text-gray-400">Jual: <span className="text-green-600">{formatCurrency(v.harga_jual, true)}</span></span>
@@ -823,7 +873,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                                   </div>
                                   <div className="text-right shrink-0">
                                     <p className="text-sm font-black text-primary">
-                                      {formatCurrency(m.qty * displayPrice, true)}
+                                      {formatCurrency(getMaterialCost(m), true)}
                                     </p>
                                     <div className="flex gap-1 mt-2 justify-end">
                                       <Button 
@@ -880,23 +930,49 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
 
             <div className="space-y-6">
               <Card className="border-none shadow-sm rounded-3xl bg-white overflow-hidden">
-                <div className="bg-primary p-6 text-white">
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Total HPP per Batch</p>
-                  <h3 className="text-3xl font-black mt-1">{formatCurrency(calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing), true)}</h3>
+                <div className={cn(
+                  "p-6 text-white transition-colors duration-500",
+                  (activeHppVariant.harga_jual < calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch)) 
+                    ? "bg-red-500" 
+                    : "orange-gradient"
+                )}>
+                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">HPP Produk / pcs</p>
+                  <h3 className="text-3xl font-black mt-1">
+                    {formatCurrency(calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch), true)}
+                  </h3>
                   <div className="mt-4 flex items-center gap-2">
                     <Badge className="bg-white/20 text-white border-none font-bold">
                       {activeHppVariant.qty_batch} pcs / batch
                     </Badge>
+                    {activeHppVariant.harga_jual < calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch) && (
+                      <Badge className="bg-white text-red-600 border-none font-black animate-pulse">
+                        RUGI!
+                      </Badge>
+                    )}
                   </div>
                 </div>
-                <CardContent className="p-6 space-y-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-bold text-gray-500">HPP per Pcs</span>
-                    <span className="text-lg font-black text-[#1A1A2E]">
-                      {formatCurrency(Math.round(calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing) / activeHppVariant.qty_batch), true)}
+                <CardContent className="p-6 space-y-4 font-medium">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-500 font-bold">Total HPP per Batch</span>
+                    <span className="font-black text-gray-900">
+                      {formatCurrency(calculateBatchHpp(activeHppVariant.bahan, activeHppVariant.harga_packing), true)}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center">
+                  <div className="pt-2 border-t border-dashed border-gray-100 mt-2">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-500 font-bold">Bahan Baku / pcs</span>
+                      <span className="font-black text-gray-900">
+                        {formatCurrency(calculateMaterialsPerPcs(activeHppVariant.bahan, activeHppVariant.qty_batch), true)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-500 font-bold">Packing / pcs</span>
+                      <span className="font-black text-gray-900">
+                        {formatCurrency((Number(activeHppVariant.harga_packing) || 0) / (Number(activeHppVariant.qty_batch) || 1), true)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center pt-2">
                     <span className="text-sm font-bold text-gray-500">Harga Jual</span>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold text-gray-400">Rp</span>
@@ -910,15 +986,25 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
                   </div>
                   <div className="pt-4 border-t border-dashed border-gray-100">
                     <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-bold text-gray-500">Laba per Pcs</span>
-                      <span className="text-lg font-black text-green-600">
-                        {formatCurrency(Math.round(activeHppVariant.harga_jual - (calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing) / activeHppVariant.qty_batch)), true)}
+                      <span className="text-sm font-bold text-gray-500 uppercase">Laba Bersih / pcs</span>
+                      <span className={cn(
+                        "text-lg font-black",
+                        (activeHppVariant.harga_jual - calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch)) >= 0 
+                          ? "text-green-600" 
+                          : "text-red-600"
+                      )}>
+                        {formatCurrency(activeHppVariant.harga_jual - calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch), true)}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-sm font-bold text-gray-500">Margin Laba</span>
-                      <Badge className="bg-green-100 text-green-700 border-none font-black">
-                        {(activeHppVariant.harga_jual > 0 ? ((activeHppVariant.harga_jual - (calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing) / activeHppVariant.qty_batch)) / activeHppVariant.harga_jual) * 100 : 0).toFixed(1)}%
+                      <span className="text-sm font-bold text-gray-500 uppercase tracking-wider">Margin Profit</span>
+                      <Badge className={cn(
+                        "border-none font-black text-sm px-3",
+                        ((activeHppVariant.harga_jual - calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch)) / Math.max(1, activeHppVariant.harga_jual)) >= 0
+                          ? "bg-green-100 text-green-700"
+                          : "bg-red-100 text-red-700"
+                      )}>
+                        {activeHppVariant.harga_jual > 0 ? (((activeHppVariant.harga_jual - calculateHpp(activeHppVariant.bahan, activeHppVariant.harga_packing, activeHppVariant.qty_batch)) / activeHppVariant.harga_jual) * 100).toFixed(1) : '0'}%
                       </Badge>
                     </div>
                   </div>
@@ -954,15 +1040,21 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         setIsProductModalOpen(open);
         if (!open) setEditingProduct(null);
       }}>
-        <DialogContent className="rounded-3xl border-none">
+        <DialogContent className="rounded-[2rem] border-none max-h-[92dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl font-black">{editingProduct ? 'Edit Produk' : 'Tambah Produk Baru'}</DialogTitle>
             <DialogDescription>Masukkan informasi produk utama di sini.</DialogDescription>
           </DialogHeader>
           <form key={editingProduct?.id || 'new-product'} onSubmit={handleSaveProduct} className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="nama" className="font-bold">Nama Produk</Label>
-              <Input id="nama" name="nama" defaultValue={editingProduct?.nama || ''} placeholder="Contoh: Cireng Isi" required className="rounded-xl" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="sku" className="font-bold text-primary">SKU (Shopee)</Label>
+                <Input id="sku" name="sku" defaultValue={editingProduct?.sku || ''} placeholder="Contoh: CIR-IND-01" className="rounded-xl border-primary bg-primary/5 focus:ring-primary font-bold h-12" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="nama" className="font-bold">Nama Produk</Label>
+                <Input id="nama" name="nama" defaultValue={editingProduct?.nama || ''} placeholder="Contoh: Cireng Isi" required className="rounded-xl h-12" />
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="deskripsi" className="font-bold">Deskripsi (Opsional)</Label>
@@ -1045,7 +1137,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         setIsVariantModalOpen(open);
         if (!open) setEditingVariant(null);
       }}>
-        <DialogContent className="rounded-3xl border-none">
+        <DialogContent className="rounded-[2rem] border-none max-h-[92dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl font-black">{editingVariant ? 'Edit Varian' : 'Tambah Varian Baru'}</DialogTitle>
             <DialogDescription>Masukkan detail varian untuk produk {selectedProduct?.nama}.</DialogDescription>
@@ -1053,7 +1145,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
           <form key={editingVariant?.id || 'new-variant'} onSubmit={handleSaveVariant} className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="nama" className="font-bold">Nama Varian</Label>
-              <Input id="nama" name="nama" defaultValue={editingVariant?.nama || ''} placeholder="Contoh: Ayam Ori" required className="rounded-xl" />
+              <Input id="nama" name="nama" defaultValue={editingVariant?.nama || ''} placeholder="Contoh: Ayam Ori" required className="rounded-xl h-12" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -1084,7 +1176,7 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
         </DialogContent>
       </Dialog>
       <Dialog open={isMaterialModalOpen} onOpenChange={setIsMaterialModalOpen}>
-        <DialogContent className="rounded-3xl border-none">
+        <DialogContent className="rounded-[2rem] border-none max-h-[92dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl font-black">Edit Bahan Baku</DialogTitle>
             <DialogDescription>Sesuaikan rincian bahan untuk perhitungan HPP.</DialogDescription>
@@ -1190,17 +1282,80 @@ export default function HPPManager({ user, products, setProducts, ingredients, s
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="mat-qty" className="font-bold">Takaran</Label>
-                <Input id="mat-qty" name="qty" type="number" step="0.01" defaultValue={editingMaterial?.material.qty || 0} required className="rounded-xl" />
+                <Label htmlFor="mat-qty" className="font-bold text-primary">Jumlah per Batch</Label>
+                <Input 
+                  id="mat-qty" 
+                  name="qty" 
+                  type="number" 
+                  step="0.0001" 
+                  placeholder="Jumlah untuk 1 batch"
+                  value={editingMaterial ? fromBaseValue(editingMaterial.material.qty, editingMaterial.material.satuan) : 0}
+                  onChange={(e) => {
+                    const newVal = parseFloat(e.target.value) || 0;
+                    setEditingMaterial(prev => {
+                      if (!prev) return null;
+                      const baseQty = toBaseValue(newVal, prev.material.satuan);
+                      return {
+                        ...prev,
+                        material: { ...prev.material, qty: baseQty }
+                      };
+                    });
+                  }}
+                  required 
+                  className="rounded-xl border-primary bg-primary/5 focus:ring-primary font-bold" 
+                />
+                <p className="text-[10px] text-gray-400 font-medium italic">Masukkan jumlah yang digunakan untuk {activeHppVariant?.qty_batch || 1} pcs (1 batch).</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="mat-satuan" className="font-bold">Satuan</Label>
-                <Input id="mat-satuan" name="satuan" defaultValue={editingMaterial?.material.satuan || 'gram'} required className="rounded-xl" />
+                <select 
+                  id="mat-satuan" 
+                  name="satuan" 
+                  value={editingMaterial?.material.satuan || 'gram'}
+                  onChange={(e) => {
+                    const newSatuan = e.target.value;
+                    setEditingMaterial(prev => {
+                      if (!prev) return null;
+                      // When unit changes, we keep the semantic value if possible or just update the unit
+                      return {
+                        ...prev, 
+                        material: { ...prev.material, satuan: newSatuan }
+                      };
+                    });
+                  }}
+                  className="w-full h-10 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary font-bold"
+                >
+                  {settings?.satuan_unit.map(u => (
+                    <option key={u} value={u.toLowerCase()}>{u}</option>
+                  ))}
+                  {!settings?.satuan_unit.map(u => u.toLowerCase()).includes(editingMaterial?.material.satuan?.toLowerCase() || '') && editingMaterial?.material.satuan && (
+                    <option value={editingMaterial.material.satuan}>{editingMaterial.material.satuan}</option>
+                  )}
+                </select>
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="mat-harga" className="font-bold">Harga per Satuan (Rp)</Label>
-              <Input id="mat-harga" name="harga" type="number" step="0.01" defaultValue={editingMaterial?.material.harga || 0} required className="rounded-xl" />
+              <Input 
+                id="mat-harga" 
+                name="harga" 
+                type="number" 
+                step="0.01" 
+                value={editingMaterial ? fromBaseValue(editingMaterial.material.harga, editingMaterial.material.satuan) * getConversionRate(editingMaterial.material.satuan) : 0}
+                onChange={(e) => {
+                   const newVal = parseFloat(e.target.value) || 0;
+                   setEditingMaterial(prev => {
+                     if (!prev) return null;
+                     const basePrice = newVal / getConversionRate(prev.material.satuan);
+                     return {
+                       ...prev,
+                       material: { ...prev.material, harga: basePrice }
+                     };
+                   });
+                }}
+                required 
+                className="rounded-xl font-bold" 
+              />
             </div>
             <DialogFooter className="pt-4 flex flex-col-reverse sm:flex-row gap-3">
               <DialogClose render={<Button type="button" variant="ghost" className="rounded-xl font-bold w-full sm:w-auto h-12">Batal</Button>} />

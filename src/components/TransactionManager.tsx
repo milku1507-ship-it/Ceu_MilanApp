@@ -40,6 +40,8 @@ import { useSettings } from '../SettingsContext';
 import { formatSmartUnit } from '../lib/unitUtils';
 import { formatCompactNumber, formatCurrency } from '../lib/formatUtils';
 
+import * as XLSX from 'xlsx';
+
 interface TransactionManagerProps {
   user: User | null;
   transactions: Transaction[];
@@ -65,6 +67,8 @@ const CATEGORIES = [
 export default function TransactionManager({ user, transactions, setTransactions, products, ingredients, setIngredients, onSuccess }: TransactionManagerProps) {
   const { settings } = useSettings();
   const dateInputRef = React.useRef<HTMLInputElement>(null);
+  const processingTxRef = React.useRef<Set<string>>(new Set());
+  const isUpdatingRef = React.useRef(false); // Execution lock
   const [searchTerm, setSearchTerm] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState('Semua');
   
@@ -130,6 +134,338 @@ export default function TransactionManager({ user, transactions, setTransactions
   const selectedProductIds = React.useMemo(() => {
     return newTx.penjualan_detail?.map(pd => pd.produk_id) || [];
   }, [newTx.penjualan_detail]);
+
+  // Helper to process and save a single transaction (used by manual form and import)
+  const processAndSaveTransaction = async (txData: any) => {
+    if (!user) return;
+    
+    // Identify affected ingredients and calculate snapshot
+    const snapshot: { ingredientId: string; stockBefore: number; delta: number }[] = [];
+    const stockUpdates: { id: string; delta: number }[] = [];
+    const ingredientIdMap = new Map(ingredients.map(i => [i.id, i]));
+    let totalHpp = 0;
+
+    if (txData.jenis === 'Pengeluaran') {
+      const matId = txData.materialId || selectedMaterialId;
+      if (matId) {
+        const material = ingredientIdMap.get(matId);
+        if (material) {
+          const delta = Number(txData.qty_beli || 0) || 0;
+          snapshot.push({ ingredientId: material.id, stockBefore: material.currentStock || 0, delta });
+          stockUpdates.push({ id: material.id, delta });
+        }
+      }
+    } else if (txData.jenis === 'Pemasukan' && txData.kategori === 'Penjualan' && txData.penjualan_detail) {
+      txData.penjualan_detail.forEach((pd: any) => {
+        const product = products.find(p => p.id === pd.produk_id);
+        if (product) {
+          pd.varian.forEach((pv: any) => {
+            if (pv.qty > 0) {
+              const variant = product.varian.find(v => v.id === pv.varian_id);
+              if (variant) {
+                const batchSize = Number(variant.qty_batch) || 1;
+                totalHpp += ((variant.harga_packing || 0) / batchSize) * pv.qty;
+                if (variant.bahan) {
+                  variant.bahan.forEach(bahan => {
+                    let ingredient = bahan.ingredientId ? ingredientIdMap.get(bahan.ingredientId) : null;
+                    if (!ingredient && bahan.nama) {
+                      const normalizedName = bahan.nama.toLowerCase().trim();
+                      ingredient = ingredients.find(i => i.name.toLowerCase().trim() === normalizedName);
+                    }
+                    if (ingredient) {
+                      let usageRaw = Number(bahan.qty) || 0;
+                      const iUnit = ingredient.unit.toLowerCase().trim();
+                      const bUnit = (bahan.satuan || '').toLowerCase().trim();
+                      if ((bUnit === 'gram' || bUnit === 'gr' || bUnit === 'g') && 
+                          (iUnit === 'kg' || iUnit === 'kilogram')) {
+                        usageRaw = usageRaw / 1000;
+                      } else if ((bUnit === 'ml' || bUnit === 'mili') && 
+                                 (iUnit === 'liter' || iUnit === 'lt' || iUnit === 'l')) {
+                        usageRaw = usageRaw / 1000;
+                      }
+                      const usagePerPcs = usageRaw / batchSize;
+                      const totalUsage = usagePerPcs * pv.qty;
+                      totalHpp += totalUsage * (ingredient.price || 0);
+                      const delta = -totalUsage;
+                      const existingSnapshot = snapshot.find(s => s.ingredientId === ingredient!.id);
+                      if (existingSnapshot) existingSnapshot.delta += delta;
+                      else snapshot.push({ ingredientId: ingredient!.id, stockBefore: ingredient!.currentStock || 0, delta });
+                      const existingUpdate = stockUpdates.find(u => u.id === ingredient!.id);
+                      if (existingUpdate) existingUpdate.delta += delta;
+                      else stockUpdates.push({ id: ingredient!.id, delta });
+                    }
+                  });
+                }
+              }
+            }
+          });
+        }
+      });
+    }
+
+    const txId = Math.random().toString(36).substr(2, 9);
+    const isPemasukan = (txData.jenis || 'Pengeluaran') === 'Pemasukan';
+    const isPenjualan = isPemasukan && txData.kategori === 'Penjualan';
+    const currentNominal = Number(txData.nominal) || 0;
+    const currentTotalPenjualan = isPemasukan ? (txData.total_penjualan ?? currentNominal) : 0;
+    const saleFees = isPenjualan ? (txData.total_biaya ?? 0) : 0;
+    const manualExpense = !isPemasukan ? currentNominal : 0;
+    const currentTotalBiaya = isPemasukan ? saleFees : manualExpense;
+    const currentLaba = isPemasukan ? (currentTotalPenjualan - currentTotalBiaya) : -currentTotalBiaya;
+
+    const txToSave: any = {
+      id: txId,
+      tanggal: txData.tanggal || new Date().toISOString().split('T')[0],
+      tanggal_akhir: txData.tanggal_akhir || null,
+      keterangan: txData.keterangan || '',
+      kategori: txData.kategori || 'Lainnya',
+      jenis: txData.jenis || 'Pengeluaran',
+      type: (txData.jenis || 'Pengeluaran').toLowerCase(),
+      nominal: currentNominal,
+      total_penjualan: currentTotalPenjualan,
+      total_biaya: currentTotalBiaya,
+      laba: currentLaba,
+      totalHpp: totalHpp,
+      qty_total: txData.qty_total || 0,
+      qty_beli: txData.qty_beli || 0,
+      createdAt: serverTimestamp(),
+      stockSnapshot: snapshot.length > 0 ? snapshot : null
+    };
+
+    if (txData.kategori === 'Penjualan' && txData.penjualan_detail) {
+      txToSave.penjualan_detail = txData.penjualan_detail.map((pd: any) => {
+        const product = products.find(p => p.id === pd.produk_id);
+        return {
+          ...pd,
+          varian: pd.varian.map((pv: any) => {
+            const variant = product?.varian.find(v => v.id === pv.varian_id);
+            let itemHpp = 0;
+            if (variant) {
+              const batchSize = Number(variant.qty_batch) || 1;
+              const packingPcs = (variant.harga_packing || 0) / batchSize;
+              const materialsPcs = variant.bahan?.reduce((acc, b) => {
+                let ing = b.ingredientId ? ingredientIdMap.get(b.ingredientId) : null;
+                if (!ing && b.nama) ing = ingredients.find(i => i.name.toLowerCase().trim() === b.nama!.toLowerCase().trim());
+                if (ing) {
+                  let usage = Number(b.qty) || 0;
+                  const iUnit = ing.unit.toLowerCase().trim();
+                  const bUnit = (b.satuan || '').toLowerCase().trim();
+                  if ((bUnit === 'gram' || bUnit === 'gr' || bUnit === 'g') && 
+                      (iUnit === 'kg' || iUnit === 'kilogram')) {
+                    usage = usage / 1000;
+                  } else if ((bUnit === 'ml' || bUnit === 'mili') && 
+                             (iUnit === 'liter' || iUnit === 'lt' || iUnit === 'l')) {
+                    usage = usage / 1000;
+                  }
+                  return acc + (usage / batchSize) * (ing.price || 0);
+                }
+                return acc;
+              }, 0) || 0;
+              itemHpp = packingPcs + materialsPcs;
+            }
+            return { ...pv, harga_jual: variant?.harga_jual || 0, hpp_pcs: itemHpp };
+          })
+        };
+      });
+    }
+
+    // Optimistic Update
+    if (stockUpdates.length > 0) {
+      setIngredients(prev => prev.map(ing => {
+        const update = stockUpdates.find(u => u.id === ing.id);
+        return update ? { ...ing, currentStock: (ing.currentStock || 0) + update.delta } : ing;
+      }));
+    }
+    setTransactions(prev => [txToSave, ...prev]);
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, `users/${user.uid}/transaksi/${txId}`), sanitizeData(txToSave));
+    stockUpdates.forEach(update => {
+      batch.update(doc(db, `users/${user.uid}/stok/${update.id}`), {
+        currentStock: increment(update.delta)
+      });
+    });
+
+    await batch.commit();
+    return txToSave;
+  };
+
+  const handleShopeeImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // MANDATORY Normalization Logic as per user request
+    const normalizeSKU = (sku: any): string => {
+      return String(sku || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '');
+    };
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+        if (rows.length === 0) {
+          toast.error("File Excel kosong.");
+          return;
+        }
+
+        // Keywords for column detection
+        const skuKeys = ["nomor referensi sku", "sku", "referensi", "product sku"].map(k => normalizeSKU(k));
+        const variantKeys = ["nama variasi", "variasi", "variant", "variation", "nama varian"].map(k => normalizeSKU(k));
+        const qtyKeys = ["jumlah", "quantity", "qty"].map(k => normalizeSKU(k));
+        const paymentKeys = ["pembayaran pembeli", "dibayar pembeli", "buyer payment", "total pembayaran"].map(k => normalizeSKU(k));
+
+        // Detect Header Row
+        let headerIndex = -1;
+        for (let i = 0; i < Math.min(rows.length, 30); i++) {
+          const row = rows[i];
+          if (!row) continue;
+          const rowStr = row.map(c => normalizeSKU(c));
+          if (rowStr.some(h => skuKeys.some(k => h.includes(k))) && 
+              rowStr.some(h => qtyKeys.some(k => h.includes(k)))) {
+            headerIndex = i;
+            break;
+          }
+        }
+
+        if (headerIndex === -1) {
+          toast.error("Format Shopee tidak dikenali. Kolom SKU atau Jumlah tidak ditemukan.");
+          return;
+        }
+
+        const rawHeaders = rows[headerIndex];
+        const normalizedHeaders = rawHeaders.map(h => normalizeSKU(h));
+        const dataRows = rows.slice(headerIndex + 1);
+
+        const findColIdx = (keywords: string[]) => {
+          return normalizedHeaders.findIndex(h => 
+            keywords.some(k => h !== "" && (h.includes(k) || k.includes(h)))
+          );
+        };
+
+        const sIdx = findColIdx(skuKeys);
+        const vIdx = findColIdx(variantKeys);
+        const qIdx = findColIdx(qtyKeys);
+        const payIdx = findColIdx(paymentKeys);
+
+        if (sIdx === -1 || qIdx === -1) {
+          toast.error("Kolom 'Nomor Referensi SKU' atau 'Jumlah' wajib ada.");
+          return;
+        }
+
+        console.log(`[IMPORT DEBUG] Total Row Excel: ${dataRows.length}`);
+        
+        const dbProducts = products.map(p => ({
+          ...p,
+          normSku: normalizeSKU(p.sku)
+        }));
+
+        let successCount = 0;
+        let failCount = 0;
+        const transactionsToCreate: any[] = [];
+
+        dataRows.forEach((row, idx) => {
+          if (!row || row.length === 0) return;
+          
+          const rawSku = row[sIdx];
+          const normXlsSku = normalizeSKU(rawSku);
+
+          if (!normXlsSku) return; // Skip empty SKU rows
+
+          const qty = parseInt(String(row[qIdx] || '0')) || 0;
+          const payment = parseFloat(String(row[payIdx] || '0').replace(/[^0-9.]/g, '')) || 0;
+          const rawVarian = vIdx !== -1 ? String(row[vIdx] || '').trim() : '';
+
+          // 1. MATCHING PRODUK WAJIB PAKAI SKU
+          const product = dbProducts.find(p => p.normSku === normXlsSku);
+
+          if (product) {
+            // Find variant
+            let variant = product.varian.find(v => 
+              normalizeSKU(v.nama) === normalizeSKU(rawVarian) ||
+              v.nama.toLowerCase().includes(rawVarian.toLowerCase()) ||
+              rawVarian.toLowerCase().includes(v.nama.toLowerCase())
+            );
+
+            // Fallback to first variant if not found but product exists
+            if (!variant && product.varian.length > 0) variant = product.varian[0];
+
+            if (variant) {
+              // 2. NAMA PRODUK HARUS DARI DATABASE APP
+              // 5. LOGIKA TRANSAKSI (qty = jumlah, nominal = pembayaran pembeli, jenis = pemasukan, kategori = penjualan)
+              const txData = {
+                jenis: 'Pemasukan',
+                kategori: 'Penjualan',
+                tanggal: new Date().toISOString().split('T')[0],
+                keterangan: `Shopee: ${product.nama} (${variant.nama})`, 
+                nominal: payment,
+                total_penjualan: payment,
+                penjualan_detail: [
+                  {
+                    produk_id: product.id,
+                    produk_nama: product.nama, // From App DB
+                    varian: [
+                      { varian_id: variant.id, varian_nama: variant.nama, qty: qty } // From App DB
+                    ]
+                  }
+                ],
+                qty_total: qty
+              };
+              transactionsToCreate.push(txData);
+              successCount++;
+            } else {
+              // 6. JIKA SKU TIDAK DITEMUKAN (atau dalam hal ini varian tidak cocok tapi SKU ada)
+              console.log(`SKU tidak ditemukan: ${rawSku} (Variant Miss)`);
+              failCount++;
+            }
+          } else {
+            // 6. JIKA SKU TIDAK DITEMUKAN
+            console.log(`SKU tidak ditemukan: ${rawSku}`);
+            failCount++;
+          }
+        });
+
+        // 🧪 DEBUG WAJIB
+        console.log(`[IMPORT DEBUG] total row Excel: ${dataRows.length}`);
+        console.log(`[IMPORT DEBUG] jumlah berhasil import: ${successCount}`);
+        console.log(`[IMPORT DEBUG] jumlah gagal (SKU tidak cocok): ${failCount}`);
+
+        if (transactionsToCreate.length === 0) {
+          toast.error("0 item berhasil dicocokkan.");
+          return;
+        }
+
+        // 3. LOOP SEMUA BARIS EXCEL (Proses semua rows)
+        setIsSaving(true);
+        for (const tx of transactionsToCreate) {
+          try {
+            await processAndSaveTransaction(tx);
+          } catch (err) {
+            console.error("Gagal save tx:", err);
+          }
+        }
+        setIsSaving(false);
+
+        toast.success(`Import Selesai!`, {
+          description: `${successCount} Transaksi berhasil diimport. ${failCount} Baris gagal.`
+        });
+        
+        if (e.target) e.target.value = '';
+
+      } catch (err) {
+        console.error("[IMPORT FATAL] error:", err);
+        toast.error("Gagal membaca file Shopee. Pastikan format Excel asli.");
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
 
   const filteredTransactions = transactions
     .filter(t => {
@@ -292,223 +628,52 @@ export default function TransactionManager({ user, transactions, setTransactions
 
   const handleAddTransaction = async () => {
     if (isSaving) return;
-    if (!newTx.keterangan || !newTx.nominal) {
+    if (!newTx.keterangan || (!newTx.nominal && newTx.kategori !== 'Penjualan')) {
       toast.error('Mohon isi keterangan dan nominal!');
       return;
     }
 
-    console.log("[TransactionManager] Starting handleAddTransaction...");
+    if (isUpdatingRef.current) {
+      console.warn("[TransactionManager] Double Execution Blocked!");
+      return; 
+    }
+
+    console.log("[TransactionManager] Starting handleAddTransaction manual save...");
+    isUpdatingRef.current = true;
     setIsSaving(true);
     
     try {
-      // Identify affected ingredients and calculate snapshot
-      const snapshot: { ingredientId: string; stockBefore: number; delta: number }[] = [];
-      const stockUpdates: { id: string; delta: number }[] = [];
-
-      // Create a map for faster lookup by ID
-      const ingredientIdMap = new Map(ingredients.map(i => [i.id, i]));
-
-      let totalHpp = 0;
-      if (newTx.jenis === 'Pengeluaran') {
-        // pengeluaran -> tambah stok
-        if (selectedMaterialId) {
-          const material = ingredientIdMap.get(selectedMaterialId);
-          if (material) {
-            const delta = newTx.qty_beli || 0;
-            snapshot.push({ ingredientId: material.id, stockBefore: material.currentStock || 0, delta });
-            stockUpdates.push({ id: material.id, delta });
-          }
-        }
-      } else if (newTx.jenis === 'Pemasukan' && newTx.kategori === 'Penjualan' && newTx.penjualan_detail) {
-        // pemasukan -> kurangi stok berdasarkan HPP
-        newTx.penjualan_detail.forEach(pd => {
-          const product = products.find(p => p.id === pd.produk_id);
-          if (product) {
-            pd.varian.forEach(pv => {
-              if (pv.qty > 0) {
-                const variant = product.varian.find(v => v.id === pv.varian_id);
-                if (variant) {
-                  // Add variant packing cost to HPP
-                  totalHpp += (variant.harga_packing || 0) * pv.qty;
-                  
-                  if (variant.bahan) {
-                    variant.bahan.forEach(bahan => {
-                      // Always prefer ingredientId if available, fallback to name-based lookup for legacy data
-                      let ingredient = bahan.ingredientId ? ingredientIdMap.get(bahan.ingredientId) : null;
-                      
-                      if (!ingredient && bahan.nama) {
-                        const normalizedName = bahan.nama.toLowerCase().trim();
-                        ingredient = ingredients.find(i => i.name.toLowerCase().trim() === normalizedName);
-                      }
-
-                      if (ingredient) {
-                        const totalUsage = (bahan.qty || 0) * pv.qty;
-                        totalHpp += totalUsage * (ingredient.price || 0);
-                        const delta = -totalUsage;
-                        
-                        const existingSnapshot = snapshot.find(s => s.ingredientId === ingredient!.id);
-                        if (existingSnapshot) {
-                          existingSnapshot.delta += delta;
-                        } else {
-                          snapshot.push({ ingredientId: ingredient!.id, stockBefore: ingredient!.currentStock || 0, delta });
-                        }
-                        
-                        const existingUpdate = stockUpdates.find(u => u.id === ingredient!.id);
-                        if (existingUpdate) {
-                          existingUpdate.delta += delta;
-                        } else {
-                          stockUpdates.push({ id: ingredient!.id, delta });
-                        }
-                      }
-                    });
-                  }
-                }
-              }
-            });
-          }
-        });
-
-        // Validasi stok agar tidak minus
-        const negativeStocks: string[] = [];
-        stockUpdates.forEach(update => {
-          const ingredient = ingredientIdMap.get(update.id);
-          if (ingredient && (ingredient.currentStock + update.delta) < 0) {
-            negativeStocks.push(ingredient.name);
-          }
-        });
-
-        if (negativeStocks.length > 0) {
-          toast.warning(`Peringatan: Stok tidak mencukupi untuk ${negativeStocks.join(', ')}`, {
-            description: 'Transaksi tetap dicatat, namun stok akan menjadi negatif.'
-          });
-        }
-      }
-
-      const txId = Math.random().toString(36).substr(2, 9);
+      await processAndSaveTransaction(newTx);
+      toast.success('Transaksi disimpan ✓');
       
-      const isPemasukan = (newTx.jenis || 'Pengeluaran') === 'Pemasukan';
-      const isPenjualan = isPemasukan && newTx.kategori === 'Penjualan';
-      
-      const currentNominal = Number(newTx.nominal) || 0;
-      const currentTotalPenjualan = isPenjualan ? (newTx.total_penjualan ?? currentNominal) : (isPemasukan ? currentNominal : 0);
-      const currentTotalBiaya = isPenjualan ? (newTx.total_biaya ?? 0) : 0;
-      const currentLaba = isPemasukan ? (isPenjualan ? (currentNominal - totalHpp) : currentNominal) : -currentNominal;
-      
-      const tx: any = {
-        id: txId,
-        tanggal: newTx.tanggal || new Date().toISOString().split('T')[0],
-        tanggal_akhir: isRange ? (newTx.tanggal_akhir ?? null) : null,
-        keterangan: newTx.keterangan || '',
-        kategori: newTx.kategori || 'Lainnya',
-        jenis: newTx.jenis || 'Pengeluaran',
-        type: (newTx.jenis || 'Pengeluaran').toLowerCase() as 'pemasukan' | 'pengeluaran',
-        nominal: currentNominal,
-        total_penjualan: currentTotalPenjualan,
-        total_biaya: currentTotalBiaya,
-        laba: currentLaba,
-        qty_total: newTx.qty_total || 0,
-        qty_beli: newTx.qty_beli || 0,
-        createdAt: serverTimestamp()
-      };
-
-      if (newTx.kategori === 'Penjualan' && newTx.penjualan_detail) {
-        tx.penjualan_detail = JSON.parse(JSON.stringify(newTx.penjualan_detail));
-      }
-
-      if (snapshot.length > 0) {
-        tx.stockSnapshot = snapshot;
-      }
-
-      if (user) {
-        // PERFORM OPTIMISTIC UPDATE IMMEDIATELY
-        if (stockUpdates.length > 0) {
-          setIngredients(prev => prev.map(ing => {
-            const update = stockUpdates.find(u => u.id === ing.id);
-            if (update) {
-              return { ...ing, currentStock: (ing.currentStock || 0) + update.delta };
-            }
-            return ing;
-          }));
-        }
-        setTransactions(prev => [tx, ...prev]);
-
-        // RESET UI IMMEDIATELY
-        setSelectedMaterialId('');
-        setSelectedTxIds([]);
-        setIsRange(false);
-        setNewTx({
-          tanggal: new Date().toISOString().split('T')[0],
-          tanggal_akhir: null,
-          jenis: 'Pemasukan',
-          kategori: 'Penjualan',
-          nominal: 0,
-          keterangan: '',
-          penjualan_detail: []
-        });
-        if (onSuccess) onSuccess();
-
-        const batch = writeBatch(db);
-        batch.set(doc(db, `users/${user.uid}/transaksi/${txId}`), sanitizeData(tx));
-        stockUpdates.forEach(update => {
-          batch.update(doc(db, `users/${user.uid}/stok/${update.id}`), {
-            currentStock: increment(update.delta)
-          });
-        });
-
-        console.log("[TransactionManager] Committing batch to Firestore...");
-        await batch.commit();
-        toast.success('Transaksi tersimpan ✓');
-      } else {
-        // Update local state and reset form
-        if (stockUpdates.length > 0) {
-          setIngredients(prev => prev.map(ing => {
-            const update = stockUpdates.find(u => u.id === ing.id);
-            if (update) {
-              return { ...ing, currentStock: (ing.currentStock || 0) + update.delta };
-            }
-            return ing;
-          }));
-        }
-        setTransactions(prev => [tx, ...prev]);
-        
-        setSelectedMaterialId('');
-        setSelectedTxIds([]);
-        setIsRange(false);
-        setNewTx({
-          tanggal: new Date().toISOString().split('T')[0],
-          tanggal_akhir: null,
-          jenis: 'Pemasukan',
-          kategori: 'Penjualan',
-          nominal: 0,
-          keterangan: '',
-          penjualan_detail: []
-        });
-        toast.success('Transaksi dicatat (Local) ✓');
-        if (onSuccess) onSuccess();
-      }
+      // Reset State & UI
+      setNewTx({
+        tanggal: new Date().toISOString().split('T')[0],
+        tanggal_akhir: null,
+        nominal: 0,
+        keterangan: '',
+        kategori: 'Lainnya',
+        jenis: 'Pengeluaran',
+        qty_beli: 1,
+        qty_total: 0,
+        penjualan_detail: []
+      });
+      setSelectedMaterialId('');
+      setSelectedTxIds([]);
+      setIsRange(false);
+      if (onSuccess) onSuccess();
 
       // Refocus to date input
       setTimeout(() => {
         dateInputRef.current?.focus();
       }, 100);
 
-      console.log("[TransactionManager] handleAddTransaction finished successfully.");
     } catch (error) {
-      console.error("[TransactionManager] Add Transaction Error:", error);
-      const errMessage = error instanceof Error ? error.message : String(error);
-      let displayError = errMessage;
-      try {
-        if (errMessage.startsWith('{')) {
-          displayError = JSON.parse(errMessage).error;
-        }
-      } catch (e) {}
-      
-      toast.error('Gagal menyimpan transaksi', {
-        description: displayError
-      });
+      console.error("[TransactionManager] Error in handleAddTransaction:", error);
+      toast.error('Gagal menyimpan transaksi');
     } finally {
       setIsSaving(false);
-      console.log("[TransactionManager] setIsSaving(false) called in handleAddTransaction.");
+      isUpdatingRef.current = false;
     }
   };
 
@@ -816,7 +981,27 @@ export default function TransactionManager({ user, transactions, setTransactions
 
             {newTx.kategori === 'Penjualan' && (
               <div className="space-y-4 pt-2 border-t border-dashed border-gray-100">
-                <Label className="text-xs font-bold text-gray-400 uppercase">Langkah 1: Pilih Produk</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-bold text-gray-400 uppercase">Langkah 1: Pilih Produk</Label>
+                  <div className="relative">
+                    <input 
+                      type="file" 
+                      accept=".xlsx, .xls" 
+                      className="hidden" 
+                      id="shopee-import" 
+                      onChange={handleShopeeImport}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => document.getElementById('shopee-import')?.click()}
+                      className="text-[10px] h-7 font-black text-primary hover:bg-brand-50 gap-1.5 px-2 rounded-lg border border-primary/20"
+                    >
+                      <ShoppingBag className="w-3 h-3 text-primary" />
+                      Import Shopee (XLS)
+                    </Button>
+                  </div>
+                </div>
                 <div className="flex flex-wrap gap-2">
                   {products.map(p => (
                     <Button
@@ -1159,7 +1344,7 @@ export default function TransactionManager({ user, transactions, setTransactions
       
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
-        <DialogContent className="sm:max-w-[425px] rounded-3xl">
+        <DialogContent className="sm:max-w-[425px] rounded-[2rem] max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl font-black">Konfirmasi Penghapusan</DialogTitle>
             <DialogDescription className="font-medium">
@@ -1187,7 +1372,7 @@ export default function TransactionManager({ user, transactions, setTransactions
       </Dialog>
       {/* Bulk Delete Confirmation Dialog */}
       <Dialog open={isBulkDeleteConfirmOpen} onOpenChange={setIsBulkDeleteConfirmOpen}>
-        <DialogContent className="sm:max-w-[425px] rounded-3xl">
+        <DialogContent className="sm:max-w-[425px] rounded-[2rem] max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl font-black">Hapus Massal ({bulkToDelete?.length})</DialogTitle>
             <DialogDescription className="font-medium">

@@ -198,12 +198,19 @@ function AppContent() {
   
   // Data Persistence (Write to Firestore)
   const updateStoreSettings = async (newSettings: StoreSettings) => {
-    if (!user) return;
-    try {
-      await setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), sanitizeData(newSettings));
-      setStoreSettings(newSettings);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/profil_toko/settings`);
+    // 1. Always update local state for immediate feedback
+    setStoreSettings(newSettings);
+    
+    // 2. Persist to appropriate storage
+    if (user) {
+      try {
+        await setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), sanitizeData(newSettings));
+        console.log('Settings synced successfully to Cloud');
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/profil_toko/settings`);
+      }
+    } else {
+      localStorage.setItem('cireng_store_settings', JSON.stringify(newSettings));
     }
   };
 

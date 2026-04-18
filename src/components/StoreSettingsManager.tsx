@@ -8,11 +8,11 @@ import { StoreSettings } from '../types';
 import { toast } from 'sonner';
 import { Store, Upload, X, Save, ArrowLeft, Settings2 } from 'lucide-react';
 
-import { auth, db, doc, setDoc, OperationType, handleFirestoreError, sanitizeData } from '../lib/firebase';
+import { auth, db, doc, setDoc, OperationType, handleFirestoreError, sanitizeData, storage, ref, uploadBytes, getDownloadURL } from '../lib/firebase';
 
 interface StoreSettingsManagerProps {
   settings: StoreSettings;
-  setSettings: React.Dispatch<React.SetStateAction<StoreSettings>>;
+  setSettings: (newSettings: StoreSettings) => Promise<void>;
   onBack: () => void;
   onManageCategories: () => void;
 }
@@ -21,11 +21,17 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
   const user = auth.currentUser;
   const [localSettings, setLocalSettings] = React.useState<StoreSettings>(settings);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        toast.error('Ukuran file maksimal 2MB!');
+        return;
+      }
+      setSelectedFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
         setLocalSettings(prev => ({ ...prev, logo: reader.result as string }));
@@ -37,28 +43,35 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
   const handleSave = async () => {
     setIsSaving(true);
     
-    // Optimistic update
-    setSettings(localSettings);
-    
-    if (user) {
-      // Background sync
-      setDoc(doc(db, `users/${user.uid}/profil_toko/settings`), sanitizeData(localSettings))
-        .then(() => {
-          console.log('Settings synced successfully');
-        })
-        .catch(error => {
-          handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/profil_toko/settings`);
-          toast.error('Gagal sinkronisasi pengaturan ke cloud.');
-        });
+    try {
+      let finalSettings = { ...localSettings };
+
+      // 1. If there's a new file and user is logged in, upload to Firebase Storage
+      if (selectedFile && user) {
+        const loadingToast = toast.loading('Mengunggah logo ke cloud...');
+        try {
+          const storageRef = ref(storage, `users/${user.uid}/brand/logo_${Date.now()}`);
+          const snapshot = await uploadBytes(storageRef, selectedFile);
+          finalSettings.logo = await getDownloadURL(snapshot.ref);
+          toast.dismiss(loadingToast);
+        } catch (uploadErr) {
+          toast.dismiss(loadingToast);
+          console.error('Logo upload failed:', uploadErr);
+          // Continue with base64 if upload fails, or fail? Let's continue but warn
+          toast.error('Gagal mengunggah logo ke storage cloud, menggunakan versi kompresi.');
+        }
+      }
+
+      // 2. Delegate persistence to App.tsx (handles Firestore vs LocalStorage)
+      await setSettings(finalSettings);
       
       toast.success('Pengaturan toko berhasil disimpan ✓');
-      setIsSaving(false);
       onBack();
-    } else {
-      localStorage.setItem('cireng_store_settings', JSON.stringify(localSettings));
-      toast.success('Pengaturan toko berhasil disimpan ✓');
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      toast.error('Gagal menyimpan pengaturan toko.');
+    } finally {
       setIsSaving(false);
-      onBack();
     }
   };
 

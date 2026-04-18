@@ -38,6 +38,7 @@ export type AdditionalFee = {
 
 export type Product = {
   id: string;
+  sku?: string;
   nama: string;
   deskripsi?: string;
   varian: Variant[];
@@ -48,6 +49,8 @@ export type PenjualanVarian = {
   varian_id: string;
   varian_nama: string;
   qty: number;
+  harga?: number;
+  hpp?: number;
 };
 
 export type PenjualanDetail = {

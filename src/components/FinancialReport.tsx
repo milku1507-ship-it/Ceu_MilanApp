@@ -35,44 +35,44 @@ export default function FinancialReport({ transactions, products }: FinancialRep
     return true;
   });
 
-  const totalGrossIncome = filteredTransactions
-    .reduce((acc, t) => acc + (t.total_penjualan ?? (t.jenis === 'Pemasukan' ? t.nominal : 0)), 0);
+  // SOURCE OF TRUTH: Direct summation from transaction fields as requested
+  // totalIncome: Sum of net income (gross - fees) from all Pemasukan transactions
+  const totalIncome = filteredTransactions
+    .filter(t => (t.jenis || t.type)?.toLowerCase() === 'pemasukan')
+    .reduce((acc, t) => acc + (t.laba || 0), 0);
+
+  // totalExpense: Sum of manual expenses ONLY (Not including HPP)
+  const totalExpense = filteredTransactions
+    .filter(t => (t.jenis || t.type)?.toLowerCase() === 'pengeluaran')
+    .reduce((acc, t) => acc + (t.total_biaya || 0), 0);
+
+  // netProfit: totalIncome (Net) - totalExpense (Manual)
+  const netProfit = totalIncome - totalExpense;
   
-  const totalTransactionFees = filteredTransactions
-    .reduce((acc, t) => acc + (t.total_biaya ?? 0), 0);
-
-  const totalOtherExpense = filteredTransactions
-    .filter(t => t.jenis === 'Pengeluaran')
-    .reduce((acc, t) => acc + t.nominal, 0);
-
-  const totalIncome = totalGrossIncome;
-  const totalExpense = totalOtherExpense + totalTransactionFees;
-
-  // Use stored laba directly as the definitive net profit
-  const netProfit = filteredTransactions.reduce((acc, t) => acc + (t.laba ?? 0), 0);
   const margin = totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0;
 
   // Category breakdown for Pie Chart
   const categoryData = filteredTransactions.reduce((acc: any[], t) => {
-    const isPenjualan = t.kategori === 'Penjualan' && t.jenis === 'Pemasukan';
-    const value = t.total_penjualan ?? t.nominal;
-    const catName = t.kategori;
+    // For income categories (Pemasukan) - We show Gross to see where money comes from
+    const isPemasukan = (t.jenis || t.type)?.toLowerCase() === 'pemasukan';
+    const isPengeluaran = (t.jenis || t.type)?.toLowerCase() === 'pengeluaran';
 
-    const existing = acc.find(item => item.name === catName);
-    if (existing) {
-      existing.value += value;
-    } else {
-      acc.push({ name: catName, value: value, jenis: t.jenis });
-    }
-    
-    // Add transaction fees to expense if any (from source of truth)
-    const fees = t.total_biaya ?? 0;
-    if (fees > 0) {
-      const feeCat = acc.find(item => item.name === 'Biaya Transaksi');
-      if (feeCat) {
-        feeCat.value += fees;
+    if (isPemasukan && t.total_penjualan > 0) {
+      const existing = acc.find(item => item.name === t.kategori);
+      if (existing) {
+        existing.value += t.total_penjualan;
       } else {
-        acc.push({ name: 'Biaya Transaksi', value: fees, jenis: 'Pengeluaran' });
+        acc.push({ name: t.kategori, value: t.total_penjualan, jenis: 'Pemasukan' });
+      }
+    }
+
+    // For expense categories
+    if (isPengeluaran && t.total_biaya > 0) {
+      const existing = acc.find(item => item.name === t.kategori);
+      if (existing) {
+        existing.value += t.total_biaya;
+      } else {
+        acc.push({ name: t.kategori, value: t.total_biaya, jenis: 'Pengeluaran' });
       }
     }
 
@@ -82,31 +82,119 @@ export default function FinancialReport({ transactions, products }: FinancialRep
   const expenseCategories = categoryData.filter(c => c.jenis === 'Pengeluaran');
 
   // Grouped expenses for the table
-  const rawExpenseData = CATEGORIES_LIST
-    .filter(c => c.type === 'Pengeluaran' || c.name === 'Lainnya')
-    .map(cat => {
-      const txs = filteredTransactions.filter(t => t.kategori === cat.name && t.jenis === 'Pengeluaran');
-      const total = txs.reduce((acc, t) => acc + t.nominal, 0);
-      return {
-        name: cat.name,
-        total,
-        count: txs.length
-      };
-    })
-    .filter(item => item.total > 0 || item.count > 0);
-
-  // Add Biaya Transaksi to the table if present
-  if (totalTransactionFees > 0) {
-    rawExpenseData.push({
-      name: 'Biaya Transaksi',
-      total: totalTransactionFees,
-      count: filteredTransactions.filter(t => t.total_biaya && t.total_biaya > 0).length
-    });
-  }
-
-  const expenseTableData = rawExpenseData.sort((a, b) => b.total - a.total);
+  const expenseTableData = filteredTransactions
+    .filter(t => (t.jenis || t.type)?.toLowerCase() === 'pengeluaran' && t.total_biaya > 0)
+    .reduce((acc: { name: string; total: number; count: number }[], t) => {
+      const catName = t.kategori;
+      const existing = acc.find(item => item.name === catName);
+      if (existing) {
+        existing.total += t.total_biaya;
+        existing.count += 1;
+      } else {
+        acc.push({ name: catName, total: t.total_biaya, count: 1 });
+      }
+      return acc;
+    }, [])
+    .sort((a, b) => b.total - a.total);
 
   const COLORS = ['#E53935', '#4ADE80', '#60A5FA', '#F472B6', '#A78BFA', '#FBBF24', '#94A3B8'];
+
+  const calculateHppPcs = (bahan: HppMaterial[], qtyBatch: number, packingCost: number = 0) => {
+    // bahan.qty is total per BATCH
+    const totalMaterials = bahan.reduce((acc, b) => acc + (Number(b.qty || 0) * (b.harga || 0)), 0);
+    const qBatch = Math.max(1, Number(qtyBatch) || 1);
+    return (totalMaterials + (Number(packingCost) || 0)) / qBatch;
+  };
+
+  // NEW: Grouped performance from transactions (NET)
+  const productPerformance = React.useMemo(() => {
+    const stats: Record<string, {
+      productName: string;
+      totalQty: number;
+      totalGross: number;
+      totalNet: number;
+      totalHPP: number;
+      variants: Record<string, {
+        variantName: string;
+        totalQty: number;
+        totalGross: number;
+        totalNet: number;
+        totalHPP: number;
+      }>
+    }> = {};
+
+    filteredTransactions
+      .filter(t => (t.jenis || t.type)?.toLowerCase() === 'pemasukan' && t.kategori === 'Penjualan' && t.penjualan_detail)
+      .forEach(t => {
+        // 1. Calculate transaction gross value to apportion fees fairly
+        let txGrossTotal = 0;
+        t.penjualan_detail?.forEach(pd => {
+          pd.varian.forEach(v => {
+            let itemPrice = (v as any).harga; // Cast to any because of transition period
+            if (itemPrice === undefined) {
+              const product = products.find(p => p.id === pd.produk_id);
+              const variant = product?.varian.find(varnt => varnt.id === v.varian_id);
+              itemPrice = variant?.harga_jual || 0;
+            }
+            txGrossTotal += (Number(v.qty) * Number(itemPrice));
+          });
+        });
+
+        // 2. Aggregate stats
+        t.penjualan_detail?.forEach(pd => {
+          if (!stats[pd.produk_id]) {
+            stats[pd.produk_id] = { 
+              productName: pd.produk_nama || 'Unknown', 
+              totalQty: 0, totalGross: 0, totalNet: 0, totalHPP: 0,
+              variants: {} 
+            };
+          }
+
+          pd.varian.forEach(v => {
+            if (!stats[pd.produk_id].variants[v.varian_id]) {
+              stats[pd.produk_id].variants[v.varian_id] = {
+                variantName: v.varian_nama || 'Unknown',
+                totalQty: 0, totalGross: 0, totalNet: 0, totalHPP: 0
+              };
+            }
+
+            // Fallbacks for legacy/current transaction data
+            let itemPrice = (v as any).harga;
+            let itemHpp = (v as any).hpp;
+            
+            if (itemPrice === undefined || itemHpp === undefined) {
+              const product = products.find(p => p.id === pd.produk_id);
+              const variant = product?.varian.find(varnt => varnt.id === v.varian_id);
+              if (itemPrice === undefined) itemPrice = variant?.harga_jual || 0;
+              if (itemHpp === undefined && variant) {
+                itemHpp = calculateHppPcs(variant.bahan, variant.qty_batch, variant.harga_packing);
+              }
+            }
+
+            const itemGross = Number(v.qty) * (Number(itemPrice) || 0);
+            const feeShare = txGrossTotal > 0 ? (itemGross / txGrossTotal) * (t.total_biaya || 0) : 0;
+            const itemNet = itemGross - feeShare;
+            const itemTotalHPP = Number(v.qty) * (Number(itemHpp) || 0);
+
+            // Update Variant Stats
+            const vStats = stats[pd.produk_id].variants[v.varian_id];
+            vStats.totalQty += v.qty;
+            vStats.totalGross += itemGross;
+            vStats.totalNet += itemNet;
+            vStats.totalHPP += itemTotalHPP;
+
+            // Update Product Stats
+            const pStats = stats[pd.produk_id];
+            pStats.totalQty += v.qty;
+            pStats.totalGross += itemGross;
+            pStats.totalNet += itemNet;
+            pStats.totalHPP += itemTotalHPP;
+          });
+        });
+      });
+
+    return Object.values(stats);
+  }, [filteredTransactions, products]);
 
   const exportCSV = () => {
     const headers = ['Tanggal', 'Keterangan', 'Kategori', 'Jenis', 'Nominal'];
@@ -121,25 +209,9 @@ export default function FinancialReport({ transactions, products }: FinancialRep
     document.body.removeChild(link);
   };
 
-  const calculateHppPcs = (bahan: HppMaterial[], qtyBatch: number, packingCost: number = 0) => {
-    if (qtyBatch === 0) return 0;
-    return (bahan.reduce((acc, b) => acc + (b.qty * b.harga), 0) + packingCost) / qtyBatch;
-  };
-
-  const getQtyTerjual = (variantId: string) => {
-    return filteredTransactions.reduce((acc, t) => {
-      if (t.penjualan_detail) {
-        t.penjualan_detail.forEach(pd => {
-          pd.varian.forEach(v => {
-            if (v.varian_id === variantId) {
-              acc += v.qty;
-            }
-          });
-        });
-      }
-      return acc;
-    }, 0);
-  };
+  // DEPRECATED Helpers
+  // const calculateHppPcs = ...
+  // const getQtyTerjual = ...
 
   return (
     <div className="space-y-6">
@@ -279,50 +351,109 @@ export default function FinancialReport({ transactions, products }: FinancialRep
           </Card>
         </div>
 
-        {/* Variant Performance Table Grouped by Product */}
+        {/* Product Performance Section */}
         <Card className="border-none shadow-sm rounded-3xl bg-white">
           <CardHeader>
             <CardTitle className="text-lg font-bold flex items-center gap-2">
               <BarIcon className="w-5 h-5 text-blue-500" />
-              Performa Varian
+              Performa Produk
             </CardTitle>
-            <CardDescription>Profitabilitas per produk</CardDescription>
+            <CardDescription>Profitabilitas berdasarkan transaksi (NET)</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {products.map((p, pIdx) => (
-              <div key={`${p.id}-${pIdx}`} className="space-y-3">
-                <p className="text-xs font-black text-[#1A1A2E] flex items-center gap-2 px-1">
-                  <Package className="w-3 h-3 text-primary" />
-                  {p.nama.toUpperCase()}
-                </p>
-                <div className="space-y-2">
-                  {p.varian.map((v, vIdx) => {
-                    const hppPcs = calculateHppPcs(v.bahan, v.qty_batch, v.harga_packing);
-                    const profit = v.harga_jual - hppPcs;
-                    const margin = v.harga_jual > 0 ? (profit / v.harga_jual) * 100 : 0;
-                    const qtyTerjual = getQtyTerjual(v.id);
-                    const estPendapatan = qtyTerjual * v.harga_jual;
-                    
-                    return (
-                      <div key={`${v.id}-${vIdx}`} className="p-4 bg-gray-50 rounded-2xl group hover:bg-brand-50 transition-colors">
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="font-bold text-[#1A1A2E]">{v.nama}</span>
-                          <Badge className="bg-blue-100 text-blue-600 border-none font-black text-[10px]">
-                            {margin.toFixed(1)}% Margin
-                          </Badge>
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-bold text-gray-400">
-                          <div>HPP: <span className="text-gray-600">{formatCurrency(Math.round(hppPcs), true)}</span></div>
-                          <div>Jual: <span className="text-gray-600">{formatCurrency(v.harga_jual, true)}</span></div>
-                          <div>Terjual: <span className="text-primary">{qtyTerjual} pcs</span></div>
-                          <div className="text-right">Est: <span className="text-green-600">{formatCurrency(estPendapatan, true)}</span></div>
-                        </div>
+            {productPerformance.length === 0 && (
+              <p className="text-center py-8 text-gray-400 font-bold">Belum ada data penjualan</p>
+            )}
+            
+            {productPerformance.map((p, pIdx) => {
+              const pProfit = p.totalNet - p.totalHPP;
+              const pMargin = p.totalNet > 0 ? (pProfit / p.totalNet) * 100 : 0;
+
+              return (
+                <div key={`${pIdx}`} className="space-y-3">
+                  <div className="bg-brand-50/50 rounded-3xl p-4 border border-brand-100/50">
+                    <div className="flex justify-between items-start mb-2">
+                      <p className="text-xs font-black text-[#1A1A2E] flex items-center gap-2">
+                        <Package className="w-4 h-4 text-primary" />
+                        {p.productName.toUpperCase()}
+                      </p>
+                      <Badge className={cn(
+                        "border-none font-black text-[10px]",
+                        pMargin >= 0 ? "bg-primary text-white" : "bg-red-500 text-white"
+                      )}>
+                        {pMargin.toFixed(1)}% Total Margin
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[10px] font-bold">
+                      <div>
+                        <span className="text-gray-400 block mb-1">TOTAL TERJUAL</span>
+                        <span className="text-primary text-sm font-black">{p.totalQty} pcs</span>
                       </div>
-                    );
-                  })}
+                      <div>
+                        <span className="text-gray-400 block mb-1">NET PENDAPATAN</span>
+                        <span className="text-[#1A1A2E] text-sm font-black">{formatCurrency(p.totalNet, true)}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 block mb-1">TOTAL HPP</span>
+                        <span className="text-gray-600 text-sm font-black">{formatCurrency(p.totalHPP, true)}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-gray-400 block mb-1">TOTAL LABA</span>
+                        <span className={cn("text-sm font-black", pProfit >= 0 ? "text-green-600" : "text-red-500")}>
+                          {formatCurrency(pProfit, true)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2 pl-4 border-l-2 border-brand-100 ml-2">
+                    {(Object.values(p.variants) as any[]).map((v, vIdx) => {
+                      const vProfit = v.totalNet - v.totalHPP;
+                      const vMargin = v.totalNet > 0 ? (vProfit / v.totalNet) * 100 : 0;
+                      
+                      return (
+                        <div key={`${vIdx}`} className="p-4 bg-gray-50 rounded-2xl group hover:bg-brand-50 transition-colors">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="font-bold text-[#1A1A2E]">{v.variantName}</span>
+                            <Badge className={cn(
+                              "border-none font-black text-[10px]",
+                              vMargin >= 0 ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
+                            )}>
+                              {vMargin.toFixed(1)}% Margin
+                            </Badge>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 text-[10px] font-bold text-gray-400">
+                            <div>
+                              NET Pendapatan:
+                              <p className="text-[#1A1A2E] text-xs font-black">{formatCurrency(v.totalNet, true)}</p>
+                            </div>
+                            <div>
+                              Total HPP:
+                              <p className="text-gray-600 text-xs font-black">{formatCurrency(v.totalHPP, true)}</p>
+                            </div>
+                            <div>
+                              Laba:
+                              <p className={cn("text-xs font-black", vProfit >= 0 ? "text-green-600" : "text-red-500")}>
+                                {formatCurrency(vProfit, true)}
+                              </p>
+                            </div>
+                            <div>
+                              Terjual:
+                              <p className="text-primary text-xs font-black">{v.totalQty} pcs</p>
+                            </div>
+                            <div className="hidden lg:block text-right">
+                              Est Harga Net:
+                              <p className="text-gray-500 text-xs font-black">{formatCurrency(Math.round(v.totalNet / v.totalQty), false)}/pcs</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
       </div>

@@ -39,14 +39,18 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
     return dateToCompare.getMonth() === currentMonth && dateToCompare.getFullYear() === currentYear;
   });
 
+  // SOURCE OF TRUTH: Direct summation from transaction fields as requested
+  // totalRevenue: Sum of net income (gross - fees) from all Pemasukan transactions
   const totalRevenue = monthlyTransactions
-    .filter(t => t.jenis === 'Pemasukan')
-    .reduce((acc, t) => acc + t.nominal, 0);
-  
-  const totalExpense = monthlyTransactions
-    .filter(t => t.jenis === 'Pengeluaran')
-    .reduce((acc, t) => acc + t.nominal, 0);
+    .filter(t => (t.jenis || t.type) === 'Pemasukan')
+    .reduce((acc, t) => acc + (t.laba || 0), 0);
 
+  // totalExpense: Sum of manual expenses ONLY (Not including HPP)
+  const totalExpense = monthlyTransactions
+    .filter(t => (t.jenis || t.type) === 'Pengeluaran')
+    .reduce((acc, t) => acc + (t.total_biaya || 0), 0);
+
+  // netProfit: totalRevenue (Net) - totalExpense (Manual)
   const netProfit = totalRevenue - totalExpense;
   const margin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
 
@@ -59,7 +63,7 @@ export default function Dashboard({ user, ingredients, transactions, storeSettin
     const dateStr = d.toISOString().split('T')[0];
     const daySales = transactions
       .filter(t => t.tanggal === dateStr && t.jenis === 'Pemasukan')
-      .reduce((acc, t) => acc + t.nominal, 0);
+      .reduce((acc, t) => acc + (t.total_penjualan || t.nominal || 0), 0);
     return {
       name: d.toLocaleDateString('id-ID', { weekday: 'short' }),
       sales: daySales
