@@ -6,9 +6,10 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { StoreSettings } from '../types';
 import { toast } from 'sonner';
-import { Store, Upload, X, Save, ArrowLeft, Settings2 } from 'lucide-react';
+import { Store, Upload, Save, ArrowLeft, Settings2 } from 'lucide-react';
+import imageCompression from 'browser-image-compression';
 
-import { auth, db, doc, setDoc, OperationType, handleFirestoreError, sanitizeData, storage, ref, uploadBytes, getDownloadURL } from '../lib/firebase';
+import { auth, db, doc, setDoc, OperationType, handleFirestoreError, sanitizeData, storage, ref, uploadBytesResumable, getDownloadURL } from '../lib/firebase';
 
 interface StoreSettingsManagerProps {
   settings: StoreSettings;
@@ -22,58 +23,114 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
   const [localSettings, setLocalSettings] = React.useState<StoreSettings>(settings);
   const [isSaving, setIsSaving] = React.useState(false);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = React.useState<number | null>(null);
+  const [isCompressing, setIsCompressing] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        toast.error('Ukuran file maksimal 2MB!');
-        return;
-      }
+    if (!file) return;
+
+    const MAX_SIZE_MB = 10;
+    if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+      toast.error(`Ukuran file maksimal ${MAX_SIZE_MB}MB!`);
+      return;
+    }
+
+    setIsCompressing(true);
+    try {
+      const compressionOptions = {
+        maxSizeMB: 1,
+        maxWidthOrHeight: 1024,
+        useWebWorker: true,
+        onProgress: (progress: number) => {
+          console.log(`[KOMPRES] ${progress}%`);
+        }
+      };
+
+      const compressedFile = await imageCompression(file, compressionOptions);
+      console.log(`[KOMPRES] ${(file.size / 1024).toFixed(0)}KB → ${(compressedFile.size / 1024).toFixed(0)}KB`);
+
+      setSelectedFile(compressedFile);
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setLocalSettings(prev => ({ ...prev, logo: reader.result as string }));
+      };
+      reader.readAsDataURL(compressedFile);
+      toast.success('Gambar berhasil dikompres ✓');
+    } catch (err) {
+      console.error('Kompresi gagal:', err);
       setSelectedFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
         setLocalSettings(prev => ({ ...prev, logo: reader.result as string }));
       };
       reader.readAsDataURL(file);
+    } finally {
+      setIsCompressing(false);
     }
   };
 
   const handleSave = async () => {
     setIsSaving(true);
-    
+    setUploadProgress(null);
+
     try {
       let finalSettings = { ...localSettings };
 
-      // 1. If there's a new file and user is logged in, upload to Firebase Storage
       if (selectedFile && user) {
-        const loadingToast = toast.loading('Mengunggah logo ke cloud...');
-        try {
-          const storageRef = ref(storage, `users/${user.uid}/brand/logo_${Date.now()}`);
-          const snapshot = await uploadBytes(storageRef, selectedFile);
-          finalSettings.logo = await getDownloadURL(snapshot.ref);
-          toast.dismiss(loadingToast);
-        } catch (uploadErr) {
-          toast.dismiss(loadingToast);
-          console.error('Logo upload failed:', uploadErr);
-          // Continue with base64 if upload fails, or fail? Let's continue but warn
-          toast.error('Gagal mengunggah logo ke storage cloud, menggunakan versi kompresi.');
-        }
+        const filePath = `logos/${user.uid}/logo-${Date.now()}.png`;
+        const storageRef = ref(storage, filePath);
+
+        await new Promise<void>((resolve, reject) => {
+          const uploadTask = uploadBytesResumable(storageRef, selectedFile);
+
+          uploadTask.on(
+            'state_changed',
+            (snapshot) => {
+              const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+              setUploadProgress(pct);
+            },
+            (error) => {
+              console.error('[UPLOAD] Error:', error);
+              reject(error);
+            },
+            async () => {
+              try {
+                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                finalSettings.logo = downloadURL;
+
+                if (user) {
+                  await setDoc(
+                    doc(db, `users/${user.uid}/profil_toko/logo`),
+                    sanitizeData({ url: downloadURL, updatedAt: new Date().toISOString() })
+                  );
+                }
+                resolve();
+              } catch (err) {
+                reject(err);
+              }
+            }
+          );
+        });
+
+        setUploadProgress(null);
       }
 
-      // 2. Delegate persistence to App.tsx (handles Firestore vs LocalStorage)
       await setSettings(finalSettings);
-      
       toast.success('Pengaturan toko berhasil disimpan ✓');
       onBack();
     } catch (error) {
       console.error('Error saving settings:', error);
-      toast.error('Gagal menyimpan pengaturan toko.');
+      setUploadProgress(null);
+      toast.error('Gagal menyimpan pengaturan toko. Coba lagi.');
     } finally {
       setIsSaving(false);
     }
   };
+
+  const isUploading = isSaving && uploadProgress !== null;
 
   return (
     <div className="space-y-6 pb-20">
@@ -101,42 +158,72 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
             <div className="flex flex-col items-center justify-center gap-4 p-6 border-2 border-dashed border-gray-100 rounded-3xl bg-gray-50/50">
               <div className="relative w-24 h-24 rounded-3xl bg-white shadow-sm flex items-center justify-center overflow-hidden border border-gray-100">
                 {localSettings.logo ? (
-                  <img 
-                    src={localSettings.logo} 
-                    alt="Logo Preview" 
+                  <img
+                    src={localSettings.logo}
+                    alt="Logo Preview"
                     referrerPolicy="no-referrer"
-                    className="w-full h-full object-contain p-2" 
+                    className="w-full h-full object-contain p-2"
                   />
                 ) : (
                   <Store className="w-10 h-10 text-gray-300" />
                 )}
-                <button 
+                <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center text-white"
+                  disabled={isCompressing || isSaving}
+                  className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center text-white disabled:cursor-not-allowed"
                 >
                   <Upload className="w-6 h-6" />
                 </button>
               </div>
-              <div className="text-center">
-                <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} className="rounded-xl font-bold">
-                  Upload Logo
+
+              <div className="text-center w-full">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isCompressing || isSaving}
+                  className="rounded-xl font-bold"
+                >
+                  {isCompressing ? 'Mengkompres...' : 'Upload Logo'}
                 </Button>
-                <p className="text-[10px] text-gray-400 mt-2">Format: JPG, PNG, SVG (Max 2MB)</p>
+                <p className="text-[10px] text-gray-400 mt-2">Format: JPG, PNG, SVG (Max 10MB — otomatis dikompres)</p>
               </div>
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                className="hidden" 
-                accept="image/*" 
-                onChange={handleLogoUpload} 
+
+              {isCompressing && (
+                <div className="w-full text-center">
+                  <p className="text-xs text-primary font-medium animate-pulse">Mengkompres gambar...</p>
+                </div>
+              )}
+
+              {isUploading && uploadProgress !== null && (
+                <div className="w-full space-y-1">
+                  <div className="flex justify-between text-xs font-medium text-gray-600">
+                    <span>Mengunggah logo...</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-primary h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept="image/*"
+                onChange={handleLogoUpload}
               />
             </div>
 
             <div className="grid gap-4">
               <div className="space-y-2">
                 <Label className="font-bold text-gray-700">Nama Toko</Label>
-                <Input 
-                  value={localSettings.name} 
+                <Input
+                  value={localSettings.name}
                   onChange={e => setLocalSettings(prev => ({ ...prev, name: e.target.value }))}
                   placeholder="Masukkan nama toko"
                   className="rounded-2xl h-12 border-gray-100 focus:ring-primary"
@@ -144,8 +231,8 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
               </div>
               <div className="space-y-2">
                 <Label className="font-bold text-gray-700">Slogan/Tagline (Opsional)</Label>
-                <Input 
-                  value={localSettings.tagline || ''} 
+                <Input
+                  value={localSettings.tagline || ''}
                   onChange={e => setLocalSettings(prev => ({ ...prev, tagline: e.target.value }))}
                   placeholder="Contoh: Jajanan Enak Setiap Hari"
                   className="rounded-2xl h-12 border-gray-100 focus:ring-primary"
@@ -153,8 +240,8 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
               </div>
               <div className="space-y-2">
                 <Label className="font-bold text-gray-700">Nomor Telepon/WhatsApp</Label>
-                <Input 
-                  value={localSettings.phone || ''} 
+                <Input
+                  value={localSettings.phone || ''}
                   onChange={e => setLocalSettings(prev => ({ ...prev, phone: e.target.value }))}
                   placeholder="Contoh: 08123456789"
                   className="rounded-2xl h-12 border-gray-100 focus:ring-primary"
@@ -162,8 +249,8 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
               </div>
               <div className="space-y-2">
                 <Label className="font-bold text-gray-700">Alamat Toko</Label>
-                <textarea 
-                  value={localSettings.address || ''} 
+                <textarea
+                  value={localSettings.address || ''}
                   onChange={e => setLocalSettings(prev => ({ ...prev, address: e.target.value }))}
                   placeholder="Masukkan alamat lengkap toko"
                   className="w-full min-h-[100px] p-4 rounded-2xl border border-gray-100 focus:ring-2 focus:ring-primary focus:outline-none text-sm font-medium"
@@ -189,8 +276,8 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                   <Label className="font-bold text-gray-700">Logo di Header (Mobile/Desktop)</Label>
                   <p className="text-xs text-gray-500">Tampilkan logo pada bagian atas aplikasi</p>
                 </div>
-                <Switch 
-                  checked={localSettings.showLogoInHeader} 
+                <Switch
+                  checked={localSettings.showLogoInHeader}
                   onCheckedChange={checked => setLocalSettings(prev => ({ ...prev, showLogoInHeader: checked }))}
                 />
               </div>
@@ -199,8 +286,8 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                   <Label className="font-bold text-gray-700">Logo di Sidebar (Tablet/Desktop)</Label>
                   <p className="text-xs text-gray-500">Tampilkan logo pada menu samping</p>
                 </div>
-                <Switch 
-                  checked={localSettings.showLogoInSidebar} 
+                <Switch
+                  checked={localSettings.showLogoInSidebar}
                   onCheckedChange={checked => setLocalSettings(prev => ({ ...prev, showLogoInSidebar: checked }))}
                 />
               </div>
@@ -224,8 +311,8 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                   <Label className="font-bold text-gray-700">Logo di Struk</Label>
                   <p className="text-xs text-gray-500">Tampilkan logo toko pada struk</p>
                 </div>
-                <Switch 
-                  checked={localSettings.showLogoOnReceipt} 
+                <Switch
+                  checked={localSettings.showLogoOnReceipt}
                   onCheckedChange={checked => setLocalSettings(prev => ({ ...prev, showLogoOnReceipt: checked }))}
                 />
               </div>
@@ -234,8 +321,8 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                   <Label className="font-bold text-gray-700">Nama Toko di Struk</Label>
                   <p className="text-xs text-gray-500">Tampilkan nama toko pada struk</p>
                 </div>
-                <Switch 
-                  checked={localSettings.showNameOnReceipt} 
+                <Switch
+                  checked={localSettings.showNameOnReceipt}
                   onCheckedChange={checked => setLocalSettings(prev => ({ ...prev, showNameOnReceipt: checked }))}
                 />
               </div>
@@ -244,15 +331,15 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
                   <Label className="font-bold text-gray-700">Alamat di Struk</Label>
                   <p className="text-xs text-gray-500">Tampilkan alamat toko pada struk</p>
                 </div>
-                <Switch 
-                  checked={localSettings.showAddressOnReceipt} 
+                <Switch
+                  checked={localSettings.showAddressOnReceipt}
                   onCheckedChange={checked => setLocalSettings(prev => ({ ...prev, showAddressOnReceipt: checked }))}
                 />
               </div>
               <div className="space-y-2">
                 <Label className="font-bold text-gray-700">Pesan Footer Struk</Label>
-                <Input 
-                  value={localSettings.receiptFooter || ''} 
+                <Input
+                  value={localSettings.receiptFooter || ''}
                   onChange={e => setLocalSettings(prev => ({ ...prev, receiptFooter: e.target.value }))}
                   placeholder="Contoh: Terima kasih sudah berbelanja!"
                   className="rounded-2xl h-12 border-gray-100 focus:ring-primary"
@@ -272,7 +359,7 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
             <CardDescription>Atur kategori HPP, Produk, dan Satuan Unit</CardDescription>
           </CardHeader>
           <CardContent className="p-6">
-            <Button 
+            <Button
               onClick={onManageCategories}
               variant="outline"
               className="w-full h-14 rounded-2xl font-bold border-brand-100 text-primary hover:bg-brand-50 flex items-center justify-between px-6"
@@ -288,19 +375,24 @@ export default function StoreSettingsManager({ settings, setSettings, onBack, on
 
         {/* E. Tombol Aksi */}
         <div className="flex flex-col sm:flex-row gap-3 pt-4">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={onBack}
+            disabled={isSaving}
             className="flex-1 h-14 rounded-2xl font-bold text-gray-600 border-gray-200"
           >
             Batal
           </Button>
-          <Button 
+          <Button
             onClick={handleSave}
-            disabled={isSaving}
+            disabled={isSaving || isCompressing}
             className="flex-1 h-14 rounded-2xl font-bold orange-gradient text-white shadow-lg shadow-brand-200"
           >
-            {isSaving ? 'Menyimpan...' : 'Simpan Perubahan'}
+            {isUploading && uploadProgress !== null
+              ? `Mengunggah ${uploadProgress}%...`
+              : isSaving
+              ? 'Menyimpan...'
+              : 'Simpan Perubahan'}
           </Button>
         </div>
       </div>
