@@ -215,6 +215,7 @@ export default function TransactionManager({ user, transactions, setTransactions
 
     const txToSave: any = {
       id: txId,
+      userId: user.uid,
       tanggal: txData.tanggal || new Date().toISOString().split('T')[0],
       tanggal_akhir: txData.tanggal_akhir || null,
       keterangan: txData.keterangan || '',
@@ -767,82 +768,64 @@ export default function TransactionManager({ user, transactions, setTransactions
   };
 
   const deleteTransaction = async (id: string) => {
+    if (!user) return;
     const tx = transactions.find(t => t.id === id);
     if (tx && tx.stockSnapshot && tx.stockSnapshot.length > 0) {
       setTxToDelete(tx);
       setIsDeleteConfirmOpen(true);
     } else {
-      if (user) {
-        try {
-          await deleteDoc(doc(db, `users/${user.uid}/transaksi/${id}`));
-        } catch (error) {
-          handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/${id}`);
-        }
-      } else {
+      try {
+        await deleteDoc(doc(db, `users/${user.uid}/transaksi/${id}`));
         setTransactions(prev => prev.filter(t => t.id !== id));
+        setSelectedTxIds(prev => prev.filter(selectedId => selectedId !== id));
+        toast.success('Transaksi dihapus');
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/${id}`);
+        toast.error('Gagal menghapus transaksi. Coba lagi.');
       }
-      setSelectedTxIds(prev => prev.filter(selectedId => selectedId !== id));
-      toast.success('Transaksi dihapus');
     }
   };
 
   const confirmDelete = async (rollback: boolean) => {
-    if (!txToDelete) return;
+    if (!txToDelete || !user) return;
     setIsDeleting(true);
-    const txId = txToDelete.id;
-
-    // OPTIMISTIC UI: Close immediately
     setIsDeleteConfirmOpen(false);
-    
-    if (user) {
+    const txId = txToDelete.id;
+    const txSnapshot = txToDelete;
+
+    try {
       const batch = writeBatch(db);
       batch.delete(doc(db, `users/${user.uid}/transaksi/${txId}`));
-      
-      if (rollback && txToDelete.stockSnapshot) {
-        txToDelete.stockSnapshot.forEach(snapshot => {
-          batch.update(doc(db, `users/${user.uid}/stok/${snapshot.ingredientId}`), {
-            currentStock: snapshot.stockBefore
+
+      if (rollback && txSnapshot.stockSnapshot) {
+        txSnapshot.stockSnapshot.forEach(snap => {
+          batch.update(doc(db, `users/${user.uid}/stok/${snap.ingredientId}`), {
+            currentStock: snap.stockBefore
           });
         });
-
-        // Local rollback (optimistic)
-        setIngredients(prev => prev.map(ing => {
-          const snapshot = txToDelete.stockSnapshot?.find(s => s.ingredientId === ing.id);
-          if (snapshot) return { ...ing, currentStock: snapshot.stockBefore };
-          return ing;
-        }));
       }
-      
+
+      await batch.commit();
+
       setTransactions(prev => prev.filter(t => t.id !== txId));
       setSelectedTxIds(prev => prev.filter(id => id !== txId));
-      toast.success(rollback ? 'Transaksi & Stok dipulihkan ✓' : 'Transaksi dihapus ✓');
 
-      batch.commit().then(() => {
-        setIsDeleting(false);
-        setTxToDelete(null);
-      }).catch(error => {
-        setIsDeleting(false);
-        setTxToDelete(null);
-        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/${txId}`);
-        toast.error('Gagal hapus di awan');
-      });
-    } else {
-      if (rollback && txToDelete.stockSnapshot) {
+      if (rollback && txSnapshot.stockSnapshot) {
         setIngredients(prev => prev.map(ing => {
-          const snapshot = txToDelete.stockSnapshot?.find(s => s.ingredientId === ing.id);
-          if (snapshot) {
-            return { ...ing, currentStock: snapshot.stockBefore };
-          }
+          const snap = txSnapshot.stockSnapshot?.find(s => s.ingredientId === ing.id);
+          if (snap) return { ...ing, currentStock: snap.stockBefore };
           return ing;
         }));
-        toast.success('Transaksi dihapus dan stok berhasil dikembalikan ✓');
+        toast.success('Transaksi & Stok dipulihkan ✓');
       } else {
-        toast.success('Transaksi dihapus, stok tidak berubah');
+        toast.success('Transaksi dihapus ✓');
       }
-      setTransactions(prev => prev.filter(t => t.id !== txToDelete.id));
-      setSelectedTxIds(prev => prev.filter(id => id !== txToDelete.id));
-      setTxToDelete(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/${txId}`);
+      toast.error('Gagal menghapus transaksi. Data tidak berubah.');
+    } finally {
       setIsDeleting(false);
+      setTxToDelete(null);
     }
   };
 
@@ -860,9 +843,9 @@ export default function TransactionManager({ user, transactions, setTransactions
     }
   };
 
-  const handleBulkDelete = () => {
-    if (selectedTxIds.length === 0) return;
-    
+  const handleBulkDelete = async () => {
+    if (selectedTxIds.length === 0 || !user) return;
+
     const selectedTxs = transactions.filter(t => selectedTxIds.includes(t.id));
     const hasSnapshot = selectedTxs.some(t => t.stockSnapshot && t.stockSnapshot.length > 0);
 
@@ -870,88 +853,79 @@ export default function TransactionManager({ user, transactions, setTransactions
       setBulkToDelete(selectedTxIds);
       setIsBulkDeleteConfirmOpen(true);
     } else {
-      if (user) {
+      const idsToDelete = [...selectedTxIds];
+      const toastId = toast.loading(`Menghapus ${idsToDelete.length} transaksi...`);
+      try {
         const batch = writeBatch(db);
-        selectedTxIds.forEach(id => {
+        idsToDelete.forEach(id => {
           batch.delete(doc(db, `users/${user.uid}/transaksi/${id}`));
         });
-        batch.commit().then(() => {
-          setSelectedTxIds([]);
-          toast.success(`${selectedTxIds.length} transaksi berhasil dihapus`);
-        }).catch(error => {
-          handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/bulk`);
-        });
-      } else {
-        setTransactions(prev => prev.filter(t => !selectedTxIds.includes(t.id)));
+        await batch.commit();
+        setTransactions(prev => prev.filter(t => !idsToDelete.includes(t.id)));
         setSelectedTxIds([]);
-        toast.success(`${selectedTxIds.length} transaksi berhasil dihapus`);
+        toast.success(`${idsToDelete.length} transaksi berhasil dihapus`, { id: toastId });
+      } catch (error) {
+        toast.dismiss(toastId);
+        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/bulk`);
+        toast.error('Gagal menghapus transaksi. Data tidak berubah.');
       }
     }
   };
 
   const confirmBulkDelete = async (rollback: boolean) => {
-    if (!bulkToDelete) return;
+    if (!bulkToDelete || !user) return;
     setIsDeleting(true);
+    const idsToDelete = [...bulkToDelete];
     const toastId = toast.loading(rollback ? 'Mengembalikan stok massal...' : 'Menghapus transaksi massal...');
 
-    if (user) {
-      try {
-        const batch = writeBatch(db);
-        bulkToDelete.forEach(id => {
-          batch.delete(doc(db, `users/${user.uid}/transaksi/${id}`));
-        });
+    try {
+      const selectedTxs = transactions.filter(t => idsToDelete.includes(t.id));
+      const batch = writeBatch(db);
 
-        if (rollback) {
-          const selectedTxs = transactions
-            .filter(t => bulkToDelete.includes(t.id));
+      idsToDelete.forEach(id => {
+        batch.delete(doc(db, `users/${user.uid}/transaksi/${id}`));
+      });
 
-          ingredients.forEach(ing => {
-            const totalDelta = selectedTxs.reduce((acc, t) => {
-              const snapshot = t.stockSnapshot?.find(s => s.ingredientId === ing.id);
-              return acc + (snapshot?.delta || 0);
-            }, 0);
-
-            if (totalDelta !== 0) {
-              batch.update(doc(db, `users/${user.uid}/stok/${ing.id}`), {
-                currentStock: increment(-totalDelta)
-              });
-            }
-          });
-        }
-
-        await batch.commit();
-        toast.success(rollback ? `${bulkToDelete.length} transaksi dihapus dan stok berhasil dikembalikan ✓` : `${bulkToDelete.length} transaksi dihapus, stok tidak berubah`, { id: toastId });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/bulk`);
-        toast.error('Gagal menghapus transaksi massal', { id: toastId });
-      }
-    } else {
       if (rollback) {
-        const selectedTxs = transactions
-          .filter(t => bulkToDelete.includes(t.id));
+        ingredients.forEach(ing => {
+          const totalDelta = selectedTxs.reduce((acc, t) => {
+            const snapshot = t.stockSnapshot?.find(s => s.ingredientId === ing.id);
+            return acc + (snapshot?.delta || 0);
+          }, 0);
+          if (totalDelta !== 0) {
+            batch.update(doc(db, `users/${user.uid}/stok/${ing.id}`), {
+              currentStock: increment(-totalDelta)
+            });
+          }
+        });
+      }
 
+      await batch.commit();
+
+      setTransactions(prev => prev.filter(t => !idsToDelete.includes(t.id)));
+      setSelectedTxIds([]);
+
+      if (rollback) {
         setIngredients(prev => prev.map(ing => {
           const totalDelta = selectedTxs.reduce((acc, t) => {
             const snapshot = t.stockSnapshot?.find(s => s.ingredientId === ing.id);
             return acc + (snapshot?.delta || 0);
           }, 0);
-
-          if (totalDelta !== 0) {
-            return { ...ing, currentStock: ing.currentStock - totalDelta };
-          }
+          if (totalDelta !== 0) return { ...ing, currentStock: ing.currentStock - totalDelta };
           return ing;
         }));
-        toast.success(`${bulkToDelete.length} transaksi dihapus dan stok berhasil dikembalikan ✓`, { id: toastId });
+        toast.success(`${idsToDelete.length} transaksi dihapus dan stok berhasil dikembalikan ✓`, { id: toastId });
       } else {
-        toast.success(`${bulkToDelete.length} transaksi dihapus, stok tidak berubah`, { id: toastId });
+        toast.success(`${idsToDelete.length} transaksi dihapus ✓`, { id: toastId });
       }
-      setTransactions(prev => prev.filter(t => !bulkToDelete.includes(t.id)));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/transaksi/bulk`);
+      toast.error('Gagal menghapus transaksi massal. Data tidak berubah.', { id: toastId });
+    } finally {
+      setIsBulkDeleteConfirmOpen(false);
+      setBulkToDelete(null);
+      setIsDeleting(false);
     }
-
-    setSelectedTxIds([]);
-    setIsBulkDeleteConfirmOpen(false);
-    setBulkToDelete(null);
-    setIsDeleting(false);
   };
 
   return (
