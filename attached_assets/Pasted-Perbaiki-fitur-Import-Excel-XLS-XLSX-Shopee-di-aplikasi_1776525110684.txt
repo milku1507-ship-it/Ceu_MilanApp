@@ -1,0 +1,167 @@
+Perbaiki fitur Import Excel (XLS/XLSX) Shopee di aplikasi saya.
+
+Fokus:
+- Memperbaiki error (BUKAN redesign)
+- Memastikan semua data Excel terbaca
+- Matching produk menggunakan SKU
+- Hasil transaksi IDENTIK seperti input manual
+
+---
+
+### 🚨 MASALAH SAAT INI
+1. Muncul "0 item berhasil dicocokkan"
+2. Data Excel banyak tapi tidak terbaca
+3. SKU tidak match padahal sudah sama (contoh: C1 di Excel dan C1 di database)
+4. Hanya sebagian / 1 data yang masuk
+5. Nama produk salah (mengambil dari Excel, harusnya dari database)
+
+---
+
+### 📊 STRUKTUR FILE SHOPEE (WAJIB DIIKUTI)
+
+Kolom penting:
+- "Nomor Referensi SKU" → SKU utama
+- "Nama Variasi" → varian
+- "Jumlah" → qty
+- "Pembayaran Pembeli" → nominal
+
+---
+
+### ✅ PERBAIKAN WAJIB
+
+#### 1. PARSE FILE XLS/XLSX DENGAN BENAR
+Gunakan library yang stabil (misal: xlsx / SheetJS)
+
+- Baca sheet pertama
+- Convert ke JSON
+- Pastikan semua baris terbaca (bukan hanya 1)
+
+Contoh:
+const data = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+---
+
+#### 2. LOOP SEMUA DATA (WAJIB)
+Jangan hanya ambil 1 row
+
+for (const row of data) {
+  proses row
+}
+
+---
+
+#### 3. AMBIL SKU DENGAN FALLBACK
+WAJIB gunakan ini:
+
+const rawSku = row["Nomor Referensi SKU"] 
+            || row["SKU Induk"] 
+            || row["Seller SKU"] 
+            || row["SKU"];
+
+Jika kosong → skip + log
+
+---
+
+#### 4. NORMALISASI SKU (KRUSIAL)
+
+function normalize(text) {
+  return String(text)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
+const sku = normalize(rawSku);
+
+---
+
+#### 5. MATCH KE DATABASE PRODUK
+
+const product = products.find(p => normalize(p.sku) === sku);
+
+- HANYA pakai SKU
+- JANGAN pakai nama produk
+
+---
+
+#### 6. JIKA SKU TIDAK DITEMUKAN
+- Jangan diam
+- Simpan ke array error:
+  missingSku.push(rawSku)
+
+---
+
+#### 7. AMBIL DATA TRANSAKSI
+
+const qty = Number(row["Jumlah"] || 0);
+const nominal = Number(row["Pembayaran Pembeli"] || 0);
+
+---
+
+#### 8. GUNAKAN DATA PRODUK DARI DATABASE
+
+JANGAN gunakan nama dari Excel
+
+Gunakan:
+- product.name
+- product.variant (jika ada)
+
+---
+
+#### 9. BUAT TRANSAKSI (SAMA SEPERTI INPUT MANUAL)
+
+transactions.push({
+  tanggal: tanggal_import,
+  kategori: "Penjualan",
+  jenis: "Pemasukan",
+  produk_id: product.id,
+  nama_produk: product.name,
+  varian: row["Nama Variasi"] || "",
+  qty: qty,
+  nominal: nominal,
+  sumber: "Shopee Import"
+});
+
+---
+
+#### 10. JANGAN OVERWRITE DATA
+Gunakan:
+- append / push
+- bukan replace
+
+---
+
+#### 11. DEBUG WAJIB
+
+console.log("Total row:", data.length);
+console.log("Berhasil match:", successCount);
+console.log("Gagal match:", missingSku.length);
+console.log("List SKU gagal:", missingSku);
+
+---
+
+#### 12. OUTPUT YANG DIHARAPKAN
+
+- Semua baris Excel terbaca
+- Semua SKU yang valid masuk
+- Tidak ada "0 item" lagi
+- Jumlah transaksi sesuai Excel
+- Nama produk dari database
+- Hasil sama seperti input manual
+
+---
+
+### ❌ LARANGAN
+- Jangan ubah sistem HPP
+- Jangan ubah stok
+- Jangan ubah laporan
+- Jangan ubah struktur database
+
+---
+
+### 🎯 TARGET AKHIR
+Import Excel harus:
+- akurat
+- lengkap
+- stabil
+- sama seperti input manual
