@@ -1,0 +1,122 @@
+PERBAIKI FITUR IMPORT XLS SHOPEE DENGAN FILTER SKU VALID SAJA
+
+TUJUAN:
+Hanya memasukkan data dari Excel jika SKU cocok dengan database.
+Jika SKU tidak ditemukan → abaikan (jangan dimasukkan ke transaksi).
+
+---
+
+ATURAN UTAMA:
+
+1. MATCHING WAJIB BERDASARKAN SKU SAJA
+
+- Jangan gunakan nama produk dari Excel
+- Gunakan SKU sebagai kunci utama
+
+---
+
+2. NORMALISASI SKU (WAJIB)
+   Sebelum dibandingkan:
+
+function normalizeSKU(sku) {
+return String(sku)
+.trim()
+.toUpperCase()
+.replace(/\s+/g, '');
+}
+
+---
+
+3. FILTER SKU VALID SAJA
+
+Flow:
+
+- Ambil semua SKU dari database → normalize
+- Loop semua baris Excel
+- Ambil SKU dari kolom: "Nomor Referensi SKU"
+- Normalize SKU Excel
+- Cek:
+
+if (skuExcel === '' || !skuDatabase.includes(skuExcel)) {
+// SKIP
+}
+
+HANYA lanjut jika SKU ditemukan
+
+---
+
+4. JANGAN BUAT TRANSAKSI JIKA TIDAK ADA SKU VALID
+
+Jika setelah filter:
+validItems.length === 0
+
+→ tampilkan:
+"0 item cocok. Pastikan SKU Excel sesuai dengan database."
+
+---
+
+5. GUNAKAN NAMA PRODUK DARI DATABASE
+
+Setelah SKU ditemukan:
+
+- Ambil data produk dari database
+- Gunakan:
+  - nama produk dari DB
+  - bukan dari Excel
+
+---
+
+6. HANDLE DUPLIKAT SKU
+
+Jika SKU muncul lebih dari 1 kali di Excel:
+
+- Gabungkan (grouping)
+- jumlahkan qty
+- jumlahkan nominal
+
+---
+
+7. BACA SEMUA BARIS EXCEL (WAJIB)
+
+Jangan berhenti di 1 baris
+Loop semua data:
+
+for (let i = 0; i < rows.length; i++)
+
+---
+
+8. DEBUG LOG (WAJIB UNTUK CEK ERROR)
+
+console.log("SKU Excel:", skuExcel)
+console.log("Match:", skuDatabase.includes(skuExcel))
+
+---
+
+9. HASIL AKHIR TRANSAKSI
+
+- Hanya berisi SKU valid
+- Nama produk dari database
+- Jumlah & nominal sesuai Excel
+- Format sama seperti input manual
+
+---
+
+10. JANGAN UBAH LOGIKA LAIN
+
+- Jangan ubah HPP
+- Jangan ubah perhitungan pajak
+- Fokus hanya:
+  - import XLS
+  - filter SKU
+  - matching
+
+---
+
+OUTPUT YANG DIHARAPKAN:
+
+✔ Tidak ada SKU yang tidak dikenal masuk
+✔ Tidak ada transaksi kosong
+✔ Semua data valid masuk dengan benar
+✔ Tidak ada error "0 item" jika SKU memang ada
+
+SELESAIKAN BUG INI SAMPAI SEMUA DATA VALID BERHASIL MASUK.
