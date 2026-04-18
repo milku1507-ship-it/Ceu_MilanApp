@@ -53,22 +53,39 @@ function AppContent() {
   // Auth Listener
   React.useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        // Kosongkan semua data saat logout agar tidak ada data user lama yang tersisa
+        setIngredients([]);
+        setProducts([]);
+        setTransactions([]);
+        setStoreSettings({
+          name: 'Ceumilan Pay',
+          showLogoOnReceipt: true,
+          showNameOnReceipt: true,
+          showAddressOnReceipt: true,
+          showLogoInHeader: true,
+          showLogoInSidebar: true,
+          receiptFooter: 'Terima kasih sudah berbelanja!',
+          onboardingCompleted: false
+        });
+      }
+
       setUser(currentUser);
       setIsAuthReady(true);
+
       if (currentUser) {
+        console.log('User ID:', currentUser.uid);
         setIsCloudSyncing(true);
-        
-        // Silent automatic migration if local data exists
-        const hasLocalData = localStorage.getItem('cireng_ingredients') || 
-                            localStorage.getItem('cireng_produk') || 
-                            localStorage.getItem('cireng_transactions');
-        
+
+        // Migrasi otomatis jika ada data lokal lama
+        const hasLocalData = localStorage.getItem('cireng_ingredients') ||
+                             localStorage.getItem('cireng_produk') ||
+                             localStorage.getItem('cireng_transactions');
         if (hasLocalData) {
           handleMigrate(currentUser);
         }
 
         try {
-          // setupNewUser logic
           const userRef = doc(db, 'users', currentUser.uid);
           const userSnap = await getDoc(userRef);
           if (!userSnap.exists()) {
@@ -139,43 +156,13 @@ function AppContent() {
     };
   }, [user]);
 
-  // Data Persistence (Local Storage for guest users)
+  // Simpan pengaturan toko ke localStorage hanya untuk branding (nama, logo, dll)
+  // Data utama (produk, transaksi, stok) HANYA dari Firestore, tidak dari localStorage
   React.useEffect(() => {
-    // Only load from localStorage if we are a guest AND the state is currently empty (initial load)
-    if (isAuthReady && !user) {
-      const localIng = localStorage.getItem('cireng_ingredients');
-      const localProd = localStorage.getItem('cireng_produk');
-      const localTx = localStorage.getItem('cireng_transactions');
-      const localSettings = localStorage.getItem('cireng_store_settings');
-
-      if (localIng && ingredients.length === 0) setIngredients(JSON.parse(localIng));
-      else if (!localIng && ingredients.length === 0) setIngredients(INITIAL_INGREDIENTS);
-
-      if (localProd && products.length === 0) setProducts(JSON.parse(localProd));
-      else if (!localProd && products.length === 0) setProducts(INITIAL_PRODUCTS);
-
-      if (localTx && transactions.length === 0) setTransactions(JSON.parse(localTx));
-      else if (!localTx && transactions.length === 0) setTransactions(SAMPLE_TRANSACTIONS);
-
-      if (localSettings) setStoreSettings(JSON.parse(localSettings));
-    }
-  }, [user, isAuthReady]); // Removed ingredients.length etc from deps to avoid re-triggering
-
-  // Save to Local Storage
-  React.useEffect(() => {
-    if (isAuthReady) {
-      // Always save settings for branding persistence
+    if (isAuthReady && user) {
       localStorage.setItem('cireng_store_settings', JSON.stringify(storeSettings));
-      
-      // Only save data for guest users OR at the moment of logout
-      // If user is null, it means we are either a guest or just logged out
-      if (!user) {
-        if (ingredients.length > 0) localStorage.setItem('cireng_ingredients', JSON.stringify(ingredients));
-        if (products.length > 0) localStorage.setItem('cireng_produk', JSON.stringify(products));
-        if (transactions.length > 0) localStorage.setItem('cireng_transactions', JSON.stringify(transactions));
-      }
     }
-  }, [ingredients, products, transactions, storeSettings, user, isAuthReady]);
+  }, [storeSettings, user, isAuthReady]);
 
   // Auto-complete onboarding if data exists in cloud
   React.useEffect(() => {
@@ -511,11 +498,13 @@ function AppContent() {
       }
       return;
     }
-    localStorage.clear();
-    setIngredients(INITIAL_INGREDIENTS);
-    setProducts(INITIAL_PRODUCTS);
-    setTransactions(SAMPLE_TRANSACTIONS);
-    toast.success('Data berhasil di-reset ke pengaturan awal.');
+    localStorage.removeItem('cireng_ingredients');
+    localStorage.removeItem('cireng_produk');
+    localStorage.removeItem('cireng_transactions');
+    setIngredients([]);
+    setProducts([]);
+    setTransactions([]);
+    toast.success('Data berhasil dikosongkan.');
   };
 
   const handleTabChange = (tab: string) => {
